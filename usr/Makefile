@@ -9,7 +9,7 @@ LD=$(TOOLPREFIX)ld
 OBJCOPY=$(TOOLPREFIX)objcopy
 OBJDUMP=$(TOOLPREFIX)objdump
 
-UMODE := 1
+UMODE := 0
 
 ULIB_OBJS = \
 	uio.o \
@@ -26,13 +26,6 @@ endif
 
 ALL_TARGETS = \
 	hello \
-	shell \
-	cat \
-	wc \
-	touch \
-	rm \
-	echo \
-	ls
 
 CFLAGS = -Wall -fno-omit-frame-pointer -ggdb -gdwarf-2
 CFLAGS += -mcmodel=medany -fno-pie -no-pie -march=rv64g -mabi=lp64d
