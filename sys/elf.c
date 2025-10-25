@@ -57,21 +57,27 @@ enum elf_et { ET_NONE = 0, ET_REL, ET_EXEC, ET_DYN, ET_CORE };
 /*! @struct elf64_ehdr
     @brief ELF header struct
 */
+
+/*
+Very good reference
+https://linux.die.net/man/5/elf
+*/
+
 struct elf64_ehdr {
-    unsigned char e_ident[16];
-    uint16_t e_type;
-    uint16_t e_machine;
-    uint32_t e_version;
-    uint64_t e_entry;
-    uint64_t e_phoff;
-    uint64_t e_shoff;
-    uint32_t e_flags;
-    uint16_t e_ehsize;
-    uint16_t e_phentsize;
-    uint16_t e_phnum;
-    uint16_t e_shentsize;
-    uint16_t e_shnum;
-    uint16_t e_shstrndx;
+    unsigned char e_ident[16];              //  contain the elf magic "\x7fELF": "0x7f454c46"
+    uint16_t e_type;                        //  file type. Should be ET_EXEC
+    uint16_t e_machine;                     //  Required Architecture                
+    uint32_t e_version;                     //  File Version
+    uint64_t e_entry;                       //  Virtual address to which the system first transfers control, thus starting the processs. If no associated entry point, set to 0
+    uint64_t e_phoff;                       //  IMPORTANT: Program header table's offset in bytes
+    uint64_t e_shoff;                       //  Section Header Table's offset
+    uint32_t e_flags;                       //  
+    uint16_t e_ehsize;                      //  Size of this ELF header
+    uint16_t e_phentsize;                   //  Size in bytes of one entry in the file's program header table in ELF file?
+    uint16_t e_phnum;                       //  Number of entries in the program header table; if # of entries is >= PN_XNUM (0xffff) then real number of entries is held in the sh_info member of initial entry in section header table
+    uint16_t e_shentsize;                   //  Size in bytes of each section header
+    uint16_t e_shnum;                       //   Section header number
+    uint16_t e_shstrndx;                    //
 };
 
 /*! @enum elf_pt
@@ -89,14 +95,14 @@ enum elf_pt { PT_NULL = 0, PT_LOAD, PT_DYNAMIC, PT_INTERP, PT_NOTE, PT_SHLIB, PT
     @brief Program header struct
 */
 struct elf64_phdr {
-    uint32_t p_type;
+    uint32_t p_type;            // if p_type == PT_LOAD load into program
     uint32_t p_flags;
-    uint64_t p_offset;
-    uint64_t p_vaddr;
-    uint64_t p_paddr;
-    uint64_t p_filesz;
-    uint64_t p_memsz;
-    uint64_t p_align;
+    uint64_t p_offset;          //  offset in ELF file where the segment data begins
+    uint64_t p_vaddr;           //  virtual address at which first byte of the segment should be put into memory
+    uint64_t p_paddr;           //  physical address (mostly unused I think)???
+    uint64_t p_filesz;          //  Number of bytes to read from the file
+    uint64_t p_memsz;           //  Number of bytes to reserve in memory for this segment. If p_memz > p_filsz zero the extra bytes
+    uint64_t p_align;           //  CP2: Alignment required in memory
 };
 
 // ELF header e_machine values (short list)
@@ -126,5 +132,81 @@ struct elf64_phdr {
  */
 int elf_load(struct uio* uio, void (**eptr)(void)) {
     // FIXME
-    return -ENOTSUP;
+    /*
+        Call the uio interface and open from storage device, reading the bytes
+    
+    
+    
+    */
+    struct elf64_ehdr ehdr;         // ELF header
+
+    // read the elf64_ehdr header
+    long ehdr_bytes_read = uio_read(uio, &ehdr, sizeof(ehdr));
+
+    // Did not read enough for the header. Invalid argument
+    if (ehdr_bytes_read != sizeof(ehdr))
+    {
+        return -EBADFMT;
+    }
+
+    // Start doing checks
+
+    // must be ELF magic number
+    if (ehdr.e_ident[0] != 0x7F || ehdr.e_ident[1] != 'E' || ehdr.e_ident[2] != 'L' || ehdr.e_ident[3] != 'F')
+    {
+        return -EBADFMT;
+    }
+
+    // must be RISCV machine
+    if (ehdr.e_machine != EM_RISCV)
+    {
+        return -EBADFMT;
+    }
+
+    //  set e_entry
+    *eptr = (void (*)(void))ehdr.e_entry;
+
+
+    // Get program header
+    // set the ops for control
+    
+
+    // start iterating over program header table
+    //  get each header
+    for (int i = 0; i < ehdr.e_phnum; i++)
+    {
+        struct elf64_phdr phdr;
+
+        unsigned long long phdr_pos = ehdr.e_phoff + i * ehdr.e_phentsize;
+        uio_cntl(uio, FCNTL_SETPOS, &phdr_pos);     // set starting address of read to program header table
+
+        long phdr_bytes_read = uio_read(uio, &phdr, sizeof(phdr));
+        
+        // Not sure if i need to check if phdr_bytes_read == sizeof(phdr)
+
+        if (phdr.p_type == PT_LOAD)
+        {
+            if (phdr.p_vaddr < RAM_START || phdr.p_vaddr > RAM_END)
+            {
+                return -ENOTSUP;    // Does not support this operation?
+            }
+            uint8_t *ram_mem = (uint8_t*)(phdr.p_vaddr);    // pointer to main memory where we will load in the segment
+
+            // first check that the memory is valid
+
+            memset(ram_mem, 0, phdr.p_memsz);               // number of bytes to set to 0 first/reserve in memory
+
+            unsigned long long seg_pos = phdr.p_offset;
+            uio_cntl(uio, FCNTL_SETPOS, &seg_pos);          //  Set address where to read ELF file from external storage
+            uio_read(uio, ram_mem, phdr.p_filesz);
+        }
+
+    }
+    return 0;
+    
+
+
+
+
+    //return -ENOTSUP;
 }
