@@ -69,8 +69,21 @@ static const struct storage_intf ramdisk_intf = {
 void ramdisk_attach() {
     // External symbols from linker script for embedded blob data
     extern char _kimg_blob_start[], _kimg_blob_end[];
+    struct ramdisk *rd;
+    size_t sz = (size_t)(_kimg_blob_end - _kimg_blob_start);
+    rd = kcalloc(1, sizeof(*rd));
+    if (rd == NULL) return; /* out of memory, silently skip registering */
 
-    // FIXME
+    /* Point to the linker-provided blob (no copy). The blob should be
+     * located in the binary image (read-only region). */
+    rd->buf = (void *)_kimg_blob_start;
+    rd->size = sz;
+
+    /* Initialize the generic storage fields (intf pointer and capacity). */
+    storage_init(&rd->storage, &ramdisk_intf, (unsigned long long)sz);
+
+    /* Register the device so higher-level code can find it by name. */
+    register_device(RAMDISK_NAME, DEV_STORAGE, rd);
 }
 
 // INTERNAL FUNCTION DEFINITIONS
@@ -82,8 +95,17 @@ void ramdisk_attach() {
  * @return 0 on success
  */
 static int ramdisk_open(struct storage *sto) {
-    // FIXME
-    return -ENOTSUP;
+    struct ramdisk *rd;
+
+    if (sto == NULL) return -EINVAL;
+
+    /* storage is the first member; cast back to ramdisk */
+    rd = (struct ramdisk *)sto;
+    /* The `storage` object is embedded at the start of `struct ramdisk`,
+     * so the caller passes a pointer to that embedded `storage`. Casting
+     * lets us access ramdisk-specific fields if needed; no init required. */
+    (void)rd; /* nothing to initialize for ramdisk */
+    return 0;
 }
 
 /**
@@ -91,7 +113,8 @@ static int ramdisk_open(struct storage *sto) {
  * @param sto Storage struct pointer for memory storage
  */
 static void ramdisk_close(struct storage *sto) {
-    // FIXME
+    /* No resources to release for the embedded blob-backed ramdisk. */
+    (void)sto; /* nothing to do for ramdisk */
     return;
 }
 
@@ -106,8 +129,26 @@ static void ramdisk_close(struct storage *sto) {
  */
 static long ramdisk_fetch(struct storage *sto, unsigned long long pos, void *buf,
                           unsigned long bytecnt) {
-    // FIXME
-    return -ENOTSUP;
+    struct ramdisk *rd;
+    unsigned long long avail;
+    unsigned long long tocopy;
+
+    if (sto == NULL || buf == NULL) return -EINVAL;
+
+    rd = (struct ramdisk *)sto;
+
+    if (pos >= rd->size) return 0; /* EOF */
+
+    avail = rd->size - pos;
+    tocopy = (unsigned long long)bytecnt;
+    if (tocopy > avail) tocopy = avail;
+
+    /* Copy from the blob into the caller's buffer. The device uses
+     * byte-granular addressing (blksz==1), so pos is a byte offset. */
+    memcpy(buf, (char *)rd->buf + pos, (size_t)tocopy);
+
+    /* Return the number of bytes delivered; 0 indicates EOF. */
+    return (long)tocopy;
 }
 
 /**
@@ -122,6 +163,23 @@ static long ramdisk_fetch(struct storage *sto, unsigned long long pos, void *buf
  * @return 0 on success, error on failure or unsupported command
  */
 static int ramdisk_cntl(struct storage *sto, int cmd, void *arg) {
-    // FIXME
-    return -ENOTSUP;
+    if (sto == NULL) return -EINVAL;
+
+    /* Many control operations write results via pointers passed in `arg`.
+     * FCNTL_GETEND expects an unsigned long long* pointing to receive the
+     * device capacity in bytes. */
+    switch (cmd) {
+    case FCNTL_GETEND: {
+        unsigned long long *endp = (unsigned long long *)arg;
+        if (endp == NULL) return -EINVAL;
+        *endp = sto->capacity; /* write capacity through caller pointer */
+        return 0;
+    }
+    case FCNTL_MMAP:
+        /* mmap not supported for the embedded blob-backed ramdisk */
+        kprintf("MMAP is not a supported yet\n");
+        return -ENOTSUP;
+    default:
+        return -ENOTSUP;
+    }
 }
