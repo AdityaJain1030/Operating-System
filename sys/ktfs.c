@@ -42,6 +42,7 @@ struct ktfs_file {
     struct ktfs_filesystem*     fs;
     struct ktfs_file*           next;               // next file in the linked list
     struct ktfs_file*           prev;               // previous file in the linked list
+    int                         dirty;              // dirty flag
 };
 
 struct ktfs_file_list {
@@ -85,6 +86,8 @@ struct ktfs_filesystem {
     struct ktfs_inode root_inode;      // root directory inode
 
     struct ktfs_filesystem* next;       // pointer to next filesystem in filesystem list
+
+    struct ktfs_file_list*  open_files;   // list of open files in this filesystem
 };
 
 // List of file systems
@@ -282,6 +285,8 @@ int ktfs_open(struct filesystem* fs, const char* name, struct uio** uioptr) {
             open_file->file_size = inode_ptr->size;
             open_file->fs = ktfs_fs;
             open_file->pos = 0;
+            open_file->dirty = 0;
+            open_file->dentry = *dentry_ptr;    // copy the dentry info
             if (open_file_list.head == NULL)
             {
                 open_file_list.head = open_file;
@@ -339,6 +344,10 @@ void ktfs_close(struct uio* uio) {
         file->next->prev = file->prev; // set the next prev member to point to file to be removed prev
     }
 
+    /*
+    
+        REPLACE WITH THE CORRECT CACHE IMPLENETAITON DO NOT USE KTFS_FLUSH!!!!!!!!!!!
+    */
     ktfs_flush((struct filesystem*) file->fs);     // flush contents to device
 
     kfree(file);   // free the file struct
