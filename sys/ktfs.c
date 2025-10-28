@@ -41,6 +41,7 @@ struct ktfs_file {
     uint64_t                    pos;
     struct ktfs_filesystem*     fs;
     struct ktfs_file*           next;               // next file in the linked list
+    struct ktfs_file*           prev;               // previous file in the linked list
 };
 
 struct ktfs_file_list {
@@ -285,10 +286,12 @@ int ktfs_open(struct filesystem* fs, const char* name, struct uio** uioptr) {
             {
                 open_file_list.head = open_file;
                 open_file_list.tail = open_file;
+                open_file->prev = NULL;
             }
             else
             {
                 open_file_list.tail->next = open_file;
+                open_file->prev = open_file_list.tail;      // set previous pointer
                 open_file_list.tail = open_file;
             }
             open_file->next = NULL;
@@ -307,6 +310,40 @@ int ktfs_open(struct filesystem* fs, const char* name, struct uio** uioptr) {
 void ktfs_close(struct uio* uio) {
     // FIXME
     // THE IO POINTER BASED UPON ABOVE STRUCT IS THE FIRST!!!!!!!!!!!!! SO WE CAN JUST GET THE STRUCT HERE!!!!!!
+    // can cast the uio pointer into uio interface which is first memebr of ktfs_file_struct so we can just direcltu cast into ktfs)ile struct
+    if (uio == NULL)
+    {
+        return;
+    }
+
+    struct ktfs_file* file = (struct ktfs_file*) uio;
+    // remove from open file list
+    if (file->prev == NULL && file->next == NULL) // head and tail of list
+    {
+        open_file_list.head = NULL;
+        open_file_list.tail = NULL;
+    }
+    else if (file->prev == NULL)    // head of list has a next
+    {
+        open_file_list.head = file->next;
+        file->next->prev = NULL;
+    }
+    else if (file->next == NULL) // tail of list
+    {
+        file->prev->next = NULL;
+        open_file_list.tail = file->prev;   // update tail
+    }
+    else 
+    {
+        file->prev->next = file->next;
+        file->next->prev = file->prev; // set the next prev member to point to file to be removed prev
+    }
+
+    ktfs_flush((struct filesystem*) file->fs);     // flush contents to device
+
+    kfree(file);   // free the file struct
+
+
     return;
 }
 
@@ -319,6 +356,8 @@ void ktfs_close(struct uio* uio) {
  */
 long ktfs_fetch(struct uio* uio, void* buf, unsigned long len) {
     // FIXME
+    struct ktfs_file* file = (struct ktfs_file*) uio;   // can do this since uio is first memebr of uio_intf which is first member of ktfs_file struct
+    
     return -ENOTSUP;
 }
 
