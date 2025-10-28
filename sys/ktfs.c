@@ -274,7 +274,7 @@ int ktfs_open(struct filesystem* fs, const char* name, struct uio** uioptr) {
             uint32_t inode_block_index = inode_number / inodes_per_block;
             uint32_t inode_index_in_block = inode_number % inodes_per_block;
             uint8_t* inode_block;
-            cache_get_block(ktfs_fs->backing_cache, inode_table_start_block + sb.inode_block_count + inode_block_index, &inode_block);
+            cache_get_block(ktfs_fs->backing_cache, inode_table_start_block + inode_block_index, &inode_block);
             struct ktfs_inode* inode_ptr = (struct ktfs_inode*)(inode_block + (inode_index_in_block * KTFS_INOSZ));
              // we assume one file system, so just use fs_list.head
             struct ktfs_file* open_file = kmalloc(sizeof(open_file));   //  create new open file
@@ -347,6 +347,69 @@ void ktfs_close(struct uio* uio) {
     return;
 }
 
+/*
+Helper function for locating data block and putting it in
+
+*/
+
+void ktfs_get_block(struct ktfs_filesystem* fs, uint16_t inode_number, uint32_t block_num, uint8_t** data_block_ptr) {
+    // assumes we give it a valid inode
+
+    // get the inode table start_block
+    uint32_t inode_table_start_block = 1 + fs->sb.inode_bitmap_block_count + fs->sb.bitmap_block_count;     // superblock is block 0
+
+    // get the Inode for the block
+    uint32_t inode_block_index = inode_number / (KTFS_BLKSZ / KTFS_INOSZ);      // divide by Inodes per block
+    uint32_t inode_index_in_block = inode_number % (KTFS_BLKSZ / KTFS_INOSZ);
+    uint8_t* inode_block;
+
+    cache_get_block(fs->backing_cache, inode_table_start_block + inode_block_index, &inode_block);
+    struct ktfs_inode* inode_ptr = (struct ktfs_inode*)(inode_block + (inode_index_in_block * KTFS_INOSZ));
+    // direct
+    if (block_num < KTFS_NUM_DIRECT_DATA_BLOCKS)
+    {
+        cache_get_block(fs->backing_cache, inode_ptr->block[block_num], (void**) data_block_ptr);
+    }
+    else if (block_num < KTFS_NUM_DIRECT_DATA_BLOCKS + (KTFS_BLKSZ / sizeof(uint32_t)))
+    {
+        // indirect
+        uint32_t indirect_index = block_num - KTFS_NUM_DIRECT_DATA_BLOCKS;                           // indirect index
+        uint8_t* indirect_block;
+        cache_get_block(fs->backing_cache, inode_ptr->indirect, &indirect_block);                   // get the indirect block
+        uint32_t* indirect_block_ptrs = (uint32_t*) indirect_block;                                 // each indirect block "entry" is 4 bytes which is the index of actual block
+        uint32_t data_block_index = indirect_block_ptrs[indirect_index];                            // use indirect index to get where the datablock actually is
+        cache_get_block(fs->backing_cache, data_block_index, (void**) data_block_ptr);                     // get the actual data block
+    }
+    else
+    {
+        // doubly indirect
+        // number of pointers we have per block
+        uint32_t PTRS_PER_BLOCK = KTFS_BLKSZ / sizeof(uint32_t);
+        uint32_t base = KTFS_NUM_DIRECT_DATA_BLOCKS + PTRS_PER_BLOCK;
+
+        // relative index within the double-indirect range
+        uint32_t raw_index = block_num - base;
+
+        // indices within each level
+        uint32_t dindirect_index = raw_index / (PTRS_PER_BLOCK * PTRS_PER_BLOCK);       // doubly indirect index
+        uint32_t indirect_index = (raw_index / PTRS_PER_BLOCK) % PTRS_PER_BLOCK;        // indirect index. Need to mod since it wraps
+        uint32_t direct_index = raw_index % PTRS_PER_BLOCK;                               // direct index
+        
+
+        uint8_t* dindirect_block;
+        cache_get_block(fs->backing_cache, inode_ptr->dindirect[dindirect_index], &dindirect_block);
+        uint32_t* indirect_ptrs = (uint32_t*) dindirect_block;
+
+        uint8_t* indirect_block;
+        cache_get_block(fs->backing_cache, indirect_ptrs[indirect_index], &indirect_block);
+        uint32_t* data_ptrs = (uint32_t*) indirect_block;   
+    
+        uint32_t data_block_index = data_ptrs[direct_index];
+        
+        cache_get_block(fs->backing_cache, data_block_index, (void**) data_block_ptr);
+    }
+}
+
 /**
  * @brief Reads data from file attached to uio into provided argument buffer
  * @param uio uio of file to be read
@@ -355,11 +418,48 @@ void ktfs_close(struct uio* uio) {
  * @return Number of bytes read if successful, negative error code if error
  */
 long ktfs_fetch(struct uio* uio, void* buf, unsigned long len) {
-    // FIXME
+    // FIXME; we assume reads are consectuive/we read from last ended position
     struct ktfs_file* file = (struct ktfs_file*) uio;   // can do this since uio is first memebr of uio_intf which is first member of ktfs_file struct
-    
-    return -ENOTSUP;
+    int num_blocks_to_read = len / KTFS_BLKSZ; // number of blocks to read
+
+    // cannot read negative
+    if (file->file_size - file->pos <= 0)
+    {
+        return -EINVAL; // or -EINNOTSUP idk??
+    }
+    // maximum we can read up to
+    len = min(len, file->file_size - file->pos); // adjust len if it exceeds file size
+    // if (len > file->file_size - file->pos)
+    // {
+    //     return -EINVAL; // cannot read more than how many byts we have left
+    // }
+
+    // iterate through all the blocks we need to read
+    for (int i = file->pos / KTFS_BLKSZ; i < (file->pos / KTFS_BLKSZ) + num_blocks_to_read; i++)
+    {
+        uint8_t* data_block;
+
+        // direct
+        ktfs_get_block(file->fs, file->dentry.inode, i, &data_block);
+        // copy data to buf
+        memcpy(buf + (i * KTFS_BLKSZ), data_block, KTFS_BLKSZ);
+    }
+
+    // now read the remaining bytes that dont fill a whole block
+    uint32_t remaining_bytes = len % KTFS_BLKSZ;
+    if (remaining_bytes > 0)
+    {
+        // read from the num_blocks to read since that is the next block
+        uint8_t* data_block;
+        ktfs_get_block(file->fs, file->dentry.inode, num_blocks_to_read, &data_block);
+        memcpy(buf + (num_blocks_to_read * KTFS_BLKSZ), data_block, remaining_bytes);
+        
+    }
+    file->pos += len;   // update position
+    return len;
+    // return -ENOTSUP;
 }
+
 
 /**
  * @brief Write data from the provided argument buffer into file attached to uio
