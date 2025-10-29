@@ -32,7 +32,7 @@
 
 /// @brief File struct for a file in the Keegan Teal Filesystem
 struct ktfs_file {
-    struct uio_intf*            intf;
+    struct uio                  uio; /* must be first so uio_init0 cast works */
     uint64_t                    file_size;
     struct ktfs_dir_entry       dentry;
     uint64_t                    pos;
@@ -72,13 +72,6 @@ static struct ktfs_filesystem_list fs_list = {
     .tail = NULL
 };
 
-static const struct uio_intf ktfs_uio_intf = {
-    .close = ktfs_close,
-    .read  = ktfs_fetch,
-    .write = ktfs_store,
-    .cntl  = ktfs_cntl
-};
-
 // INTERNAL FUNCTION DECLARATIONS
 //
 
@@ -94,6 +87,12 @@ void ktfs_flush(struct filesystem* fs);
 void ktfs_listing_close(struct uio* uio);
 long ktfs_listing_read(struct uio* uio, void* buf, unsigned long bufsz);
 
+static const struct uio_intf ktfs_uio_intf = {
+    .close = ktfs_close,
+    .read  = ktfs_fetch,
+    .write = ktfs_store,
+    .cntl  = ktfs_cntl
+};
 /**
  * @brief Mounts the file system with associated backing cache
  * @param cache Pointer to cache struct for the file system
@@ -105,7 +104,7 @@ int mount_ktfs(const char* name, struct cache* cache) {
 
     // need to read superblock?
     uint8_t* sb_ptr;
-    cache_get_block(cache, 0, &sb_ptr);
+    cache_get_block(cache, 0, (void**)&sb_ptr);
     struct ktfs_superblock* disk_sb = (struct ktfs_superblock*) sb_ptr;
     fs->sb = *disk_sb;
     //CHANGED: Release superblock after copying data - we no longer need the cache block
@@ -114,7 +113,7 @@ int mount_ktfs(const char* name, struct cache* cache) {
     uint32_t inode_table_start_block = 1 + fs->sb.inode_bitmap_block_count + fs->sb.bitmap_block_count;
 
     uint8_t* inode_block_ptr;
-    cache_get_block(cache, inode_table_start_block, &inode_block_ptr);
+    cache_get_block(cache, inode_table_start_block, (void**)&inode_block_ptr);
     fs->root_inode = *((struct ktfs_inode*) inode_block_ptr);
     //CHANGED: Release inode block after copying root inode data
     cache_release_block(cache, inode_block_ptr, 0);
@@ -134,7 +133,8 @@ int mount_ktfs(const char* name, struct cache* cache) {
         fs->next = NULL;
     }
 
-    attach_filesystem(name, fs);
+    /* pass the embedded filesystem interface to match attach_filesystem prototype */
+    attach_filesystem(name, &fs->intf);
     //CHANGED: Return 0 on success instead of -ENOTSUP
     return 0;
 }
@@ -163,16 +163,16 @@ int ktfs_open(struct filesystem* fs, const char* name, struct uio** uioptr) {
         uint8_t* data_block;
 
         if (dentry_block_index < KTFS_NUM_DIRECT_DATA_BLOCKS) {
-            cache_get_block(ktfs_fs->backing_cache, ktfs_fs->root_inode.block[dentry_block_index], &data_block);
+            cache_get_block(ktfs_fs->backing_cache, ktfs_fs->root_inode.block[dentry_block_index], (void**)&data_block);
         } else if (dentry_block_index < KTFS_NUM_DIRECT_DATA_BLOCKS + (KTFS_BLKSZ / sizeof(uint32_t))) {
             uint32_t indirect_index = dentry_block_index - KTFS_NUM_DIRECT_DATA_BLOCKS;
             uint8_t* indirect_block;
-            cache_get_block(ktfs_fs->backing_cache, ktfs_fs->root_inode.indirect, &indirect_block);
+            cache_get_block(ktfs_fs->backing_cache, ktfs_fs->root_inode.indirect, (void**)&indirect_block);
             uint32_t* indirect_block_ptrs = (uint32_t*) indirect_block;
             uint32_t data_block_index = indirect_block_ptrs[indirect_index];
             //CHANGED: Release indirect block after getting data block index
             cache_release_block(ktfs_fs->backing_cache, indirect_block, 0);
-            cache_get_block(ktfs_fs->backing_cache, data_block_index, &data_block);
+            cache_get_block(ktfs_fs->backing_cache, data_block_index, (void**)&data_block);
         } else {
             uint32_t PTRS_PER_BLOCK = KTFS_BLKSZ / sizeof(uint32_t);
             uint32_t base = KTFS_NUM_DIRECT_DATA_BLOCKS + PTRS_PER_BLOCK;
@@ -182,11 +182,11 @@ int ktfs_open(struct filesystem* fs, const char* name, struct uio** uioptr) {
             uint32_t direct_index = raw_index % PTRS_PER_BLOCK;
             
             uint8_t* dindirect_block;
-            cache_get_block(ktfs_fs->backing_cache, ktfs_fs->root_inode.dindirect[dindirect_index], &dindirect_block);
+            cache_get_block(ktfs_fs->backing_cache, ktfs_fs->root_inode.dindirect[dindirect_index], (void**)&dindirect_block);
             uint32_t* indirect_ptrs = (uint32_t*) dindirect_block;
             
             uint8_t* indirect_block;
-            cache_get_block(ktfs_fs->backing_cache, indirect_ptrs[indirect_index], &indirect_block);
+            cache_get_block(ktfs_fs->backing_cache, indirect_ptrs[indirect_index], (void**)&indirect_block);
             //CHANGED: Release dindirect block after getting indirect block index
             cache_release_block(ktfs_fs->backing_cache, dindirect_block, 0);
             
@@ -195,7 +195,7 @@ int ktfs_open(struct filesystem* fs, const char* name, struct uio** uioptr) {
             //CHANGED: Release indirect block after getting data block index
             cache_release_block(ktfs_fs->backing_cache, indirect_block, 0);
             
-            cache_get_block(ktfs_fs->backing_cache, data_block_index, &data_block);
+            cache_get_block(ktfs_fs->backing_cache, data_block_index, (void**)&data_block);
         }
         
         struct ktfs_dir_entry* dentry_ptr = (struct ktfs_dir_entry*)(data_block + (dentry_index_in_block * KTFS_DENSZ));
@@ -205,7 +205,7 @@ int ktfs_open(struct filesystem* fs, const char* name, struct uio** uioptr) {
             uint32_t inode_block_index = inode_number / inodes_per_block;
             uint32_t inode_index_in_block = inode_number % inodes_per_block;
             uint8_t* inode_block;
-            cache_get_block(ktfs_fs->backing_cache, inode_table_start_block + inode_block_index, &inode_block);
+            cache_get_block(ktfs_fs->backing_cache, inode_table_start_block + inode_block_index, (void**)&inode_block);
             struct ktfs_inode* inode_ptr = (struct ktfs_inode*)(inode_block + (inode_index_in_block * KTFS_INOSZ));
             
             struct ktfs_file* open_file = kmalloc(sizeof(struct ktfs_file));
@@ -288,7 +288,7 @@ void ktfs_get_block(struct ktfs_filesystem* fs, uint16_t inode_number, uint32_t 
     uint32_t inode_index_in_block = inode_number % (KTFS_BLKSZ / KTFS_INOSZ);
     uint8_t* inode_block;
 
-    cache_get_block(fs->backing_cache, inode_table_start_block + inode_block_index, &inode_block);
+    cache_get_block(fs->backing_cache, inode_table_start_block + inode_block_index, (void**)&inode_block);
     struct ktfs_inode* inode_ptr = (struct ktfs_inode*)(inode_block + (inode_index_in_block * KTFS_INOSZ));
     
     if (block_num < KTFS_NUM_DIRECT_DATA_BLOCKS) {
@@ -303,7 +303,7 @@ void ktfs_get_block(struct ktfs_filesystem* fs, uint16_t inode_number, uint32_t 
         uint32_t indirect_block_index = inode_ptr->indirect;
         cache_release_block(fs->backing_cache, inode_block, 0);
         
-        cache_get_block(fs->backing_cache, indirect_block_index, &indirect_block);
+    cache_get_block(fs->backing_cache, indirect_block_index, (void**)&indirect_block);
         uint32_t* indirect_block_ptrs = (uint32_t*) indirect_block;
         uint32_t data_block_index = indirect_block_ptrs[indirect_index];
         //CHANGED: Release indirect block after getting data block index
@@ -322,14 +322,14 @@ void ktfs_get_block(struct ktfs_filesystem* fs, uint16_t inode_number, uint32_t 
         cache_release_block(fs->backing_cache, inode_block, 0);
         
         uint8_t* dindirect_block;
-        cache_get_block(fs->backing_cache, dindirect_block_index, &dindirect_block);
+    cache_get_block(fs->backing_cache, dindirect_block_index, (void**)&dindirect_block);
         uint32_t* indirect_ptrs = (uint32_t*) dindirect_block;
         uint32_t indirect_block_index = indirect_ptrs[indirect_index];
         //CHANGED: Release dindirect block after getting indirect block index
         cache_release_block(fs->backing_cache, dindirect_block, 0);
         
-        uint8_t* indirect_block;
-        cache_get_block(fs->backing_cache, indirect_block_index, &indirect_block);
+    uint8_t* indirect_block;
+    cache_get_block(fs->backing_cache, indirect_block_index, (void**)&indirect_block);
         uint32_t* data_ptrs = (uint32_t*) indirect_block;
         uint32_t data_block_index = data_ptrs[direct_index];
         //CHANGED: Release indirect block after getting data block index
@@ -350,8 +350,10 @@ void ktfs_get_block(struct ktfs_filesystem* fs, uint16_t inode_number, uint32_t 
 long ktfs_fetch(struct uio* uio, void* buf, unsigned long len) {
     struct ktfs_file* file = (struct ktfs_file*) uio;
     
-    //CHANGED: Adjust len to not exceed file size, return 0 at EOF (not an error)
-    len = min(len, file->file_size - file->pos);
+    //CHANGED: can't use min without library, return 0 at EOF (not an error);
+    if (len > file->file_size - file->pos) {
+    len = file->file_size - file->pos;
+    }
     if (len == 0) {
         return 0;  // At EOF, return 0 bytes read
     }
@@ -365,12 +367,21 @@ long ktfs_fetch(struct uio* uio, void* buf, unsigned long len) {
         uint32_t block_num = current_pos / KTFS_BLKSZ;
         // Offset within that block
         uint32_t offset_in_block = current_pos % KTFS_BLKSZ;
-        // How many bytes to copy from this block
-        uint32_t bytes_in_block = min(KTFS_BLKSZ - offset_in_block, len - bytes_copied);
+        // How many bytes to copy from this block LOWKEY NOT SURE IF WE CAN USE std::min .-. 
+        uint32_t bytes_to_end_of_block = KTFS_BLKSZ - offset_in_block;
+    uint32_t remaining_len = len - bytes_copied;
+    uint32_t bytes_in_block;
+
+    if (bytes_to_end_of_block < remaining_len) {
+        bytes_in_block = bytes_to_end_of_block;
+    } else {
+        bytes_in_block = remaining_len;
+    }
+
         
         // Get the block
-        uint8_t* data_block;
-        ktfs_get_block(file->fs, file->dentry.inode, block_num, &data_block);
+    uint8_t* data_block;
+    ktfs_get_block(file->fs, file->dentry.inode, block_num, &data_block);
         
         // Copy the relevant portion
         memcpy(buf + bytes_copied, data_block + offset_in_block, bytes_in_block);
