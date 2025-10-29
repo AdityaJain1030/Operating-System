@@ -1,175 +1,3 @@
-/*! @file vioblk.c‌‌‍‍‌‍⁠‌‌​‌‌‌⁠‍‌‌​⁠‍‌‌‌‍​⁠‍‌‌‍⁠​‌‌‍‌​⁠​‍‌‌‌‌‌⁠‍‍‌​⁠⁠‌‌‌​‌​‌‍‌‍‌‍‌‌‍‍​⁠​⁠‌​‍‍‌⁠‌‍‌‍‌​‌‌‍​‌​​‍‌‍‌‍‌​⁠‍‌​‌​‌‍‌⁠​⁠⁠‌
-    @brief VirtIO block device
-    @copyright Copyright (c) 2024-2025 University of Illinois
-
-*/
-
-#include "devimpl.h"
-#ifdef VIOBLK_TRACE
-#define TRACE
-#endif
-
-#ifdef VIOBLK_DEBUG
-#define DEBUG
-#endif
-
-#include <limits.h>
-
-#include "conf.h"
-#include "console.h"
-#include "device.h"
-#include "error.h"
-#include "heap.h"
-#include "intr.h"
-#include "misc.h"
-#include "string.h"
-#include "thread.h"
-#include "uio.h"  // FCNTL
-#include "virtio.h"
-
-// COMPILE-TIME PARAMETERS
-//
-
-#ifndef VIOBLK_INTR_PRIO
-#define VIOBLK_INTR_PRIO 1
-#endif
-
-#ifndef VIOBLK_NAME
-#define VIOBLK_NAME "vioblk"
-#endif
-
-// INTERNAL CONSTANT DEFINITIONS
-//
-
-//VIOBLK device structure
-
-struct vioblk_storage {
-    struct storage base;
-    volatile struct virtio_mmio_regs * regs;
-    int irqno;
-    char opened;
-
-    struct virtq_desc *desc;
-    struct virtq_avail *avail;
-    struct virtq_used *used;
-    unsigned int queue_size;
-    uint16_t next_desc_idx;
-
-    struct {
-        uint32_t type;
-        uint32_t reserved;
-        uint64_t sector;
-    } req_header;
-    uint8_t req_status;
-
-    struct condition ready;
-    struct lock lock;
-};
-
-// VirtIO block device feature bits (number, *not* mask)
-
-#define VIRTIO_BLK_F_SIZE_MAX 1
-#define VIRTIO_BLK_F_SEG_MAX 2
-#define VIRTIO_BLK_F_GEOMETRY 4
-#define VIRTIO_BLK_F_RO 5
-#define VIRTIO_BLK_F_BLK_SIZE 6
-#define VIRTIO_BLK_F_FLUSH 9
-#define VIRTIO_BLK_F_TOPOLOGY 10
-#define VIRTIO_BLK_F_CONFIG_WCE 11
-#define VIRTIO_BLK_F_MQ 12
-#define VIRTIO_BLK_F_DISCARD 13
-#define VIRTIO_BLK_F_WRITE_ZEROES 14
-
-// INTERNAL GLOBAL INTERFACES 
-
-static const struct storage_intf vioblk_storage_intf = {
-    .blksz = 512,
-    .open = &vioblk_storage_open,
-    .close = &vioblk_storage_close,
-    .fetch = &vioblk_storage_fetch,
-    .store = &vioblk_storage_store,
-    .cntl = &vioblk_storage_cntl
-};
-
-// INTERNAL FUNCTION DECLARATIONS
-//
-
-/**
- * @brief Sets the virtq avail and virtq used queues such that they are available for use. (Hint,
- * read virtio.h) Enables the interupt line for the virtio device and sets necessary flags in vioblk
- * device.
- * @param sto Storage IO struct for the storage device
- * @return Return 0 on success or negative error code if error. If the given sto is already opened,
- * then return -EBUSY.
- */
-static int vioblk_storage_open(struct storage* sto);
-
-
-/**
- * @brief Resets the virtq avail and virtq used queues and sets necessary flags in vioblk device. If
- * the given sto is not opened, this function does nothing.
- * @param sto Storage IO struct for the storage device
- * @return None
- */
-static void vioblk_storage_close(struct storage* sto);
-
-/**
- * @brief Reads bytecnt number of bytes from the disk and writes them to buf. Achieves this by
- * repeatedly setting the appropriate registers to request a block from the disk, waiting until the
- * data has been populated in block buffer cache, and then writes that data out to buf. Thread
- * sleeps while waiting for the disk to service the request.
- * @param sto Storage IO struct for the storage device
- * @param pos The starting position for the read within the VirtIO device
- * @param buf A pointer to the buffer to fill with the read data
- * @param bytecnt The number of bytes to read from the VirtIO device into the buffer
- * @return The number of bytes read from the device, or negative error code if error
- */
-static long vioblk_storage_fetch(struct storage* sto, unsigned long long pos, void* buf,
-                                 unsigned long bytecnt);
-
-/**
- * @brief Writes bytecnt number of bytes from the parameter buf to the disk. The size of the virtio
- * device should not change. You should only overwrite existing data. Write should also not create
- * any new files. Achieves this by filling up the block buffer cache and then setting the
- * appropriate registers to request the disk write the contents of the cache to the specified block
- * location. Thread sleeps while waiting for the disk to service the request.
- * @param sto Storage IO struct for the storage device
- * @param pos The starting position for the write within the VirtIO device
- * @param buf A pointer to the buffer with the data to write
- * @param bytecnt The number of bytes to write to the VirtIO device from the buffer
- * @return The number of bytes written to the device, or negative error code if error
- */
-static long vioblk_storage_store(struct storage* sto, unsigned long long pos, const void* buf,
-                                 unsigned long bytecnt);
-
-/**
- * @brief Given a file io object, a specific command, and possibly some arguments, execute the
- * corresponding functions on the VirtIO block device.
- * @details Any commands such as FCNTL_GETEND should pass back through the arg variable. Do not
- * directly return the value.
- * @details FCNTL_GETEND should return the capacity of the VirtIO block device in bytes.
- * @param sto Storage IO struct for the storage device
- * @param op Operation to execute. vioblk should support FCNTL_GETEND.
- * @param arg Argument specific to the operation being performed
- * @return Status code on the operation performed
- */
-static int vioblk_storage_cntl(struct storage* sto, int op, void* arg);
-
-/**
- * @brief The interrupt handler for the VirtIO device. When an interrupt occurs, the system will
- * call this function.
- * @param irqno The interrupt request number for the VirtIO device
- * @param aux A generic pointer for auxiliary data.
- * @return None
- */
-static void vioblk_isr(int irqno, void* aux);
-
-
-static long vioblk_helper(struct storage* sto, unsigned long long pos, void* buf, unsigned long bytecnt, int write_en)
-{
-     finish the implementation for vioblk
-C
-
 /*! @file vioblk.c‌‌‍‍‌‍⁠‌‌​‌‌‌⁠‍‌‌​⁠‍‌‌‌‍​⁠‍‌‌‍⁠​‌‌‍‌​⁠​‍‌‌‌‌‌⁠‍Pillaging-Koala-Pink-Giraffe
     @brief VirtIO block device
     @copyright Copyright (c) 2024-2025 University of Illinois
@@ -346,7 +174,7 @@ static long vioblk_helper(struct storage* sto, unsigned long long pos, void* buf
     // 7. Wait for ISR
     int pie = disable_interrupts();
     while (old_used_idx == blk->used->idx) {
-        condition_sleep(&blk->ready, &blk->lock);
+        condition_wait(&blk->ready);
     }
     restore_interrupts(pie);
 
@@ -354,7 +182,7 @@ static long vioblk_helper(struct storage* sto, unsigned long long pos, void* buf
     blk->next_desc_idx = (stat_idx + 1) % blk->queue_size;
 
     // 9. Check status and release lock
-    long ret_val = (blk->req_status == VIRTIO_BLK_S_OK) ? (long)bytecnt : -EINOPS;
+    long ret_val = (blk->req_status == VIRTIO_BLK_S_OK) ? (long)bytecnt : -EINVAL;
     lock_release(&blk->lock);
     
     return ret_val;
