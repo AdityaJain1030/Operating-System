@@ -136,17 +136,23 @@ int cache_get_block(struct cache* cache, unsigned long long pos, void** pptr) {
     long result;
 
     if (cache == NULL || pptr == NULL) return -EINVAL;
-
     if (pos % CACHE_BLKSZ != 0) return -EINVAL;
 
     lock_acquire(&cache->lock);
 
-    /* Look for existing block (including blocks being loaded) */
     while (1) {
         block = find_block(cache, pos);
+        
         if (block != NULL) {
+            /* Block exists in cache (either valid or being loaded) */
+            if (block->loading) {
+                /* Another thread is loading this block - wait for completion */
+                condition_wait(&cache->cond);
+                continue; /* Re-check from beginning after waking */
+            }
+            
             if (block->valid) {
-                /* in-cache: bump refcnt and move to head */
+                /* Block is valid and ready to use */
                 block->refcnt++;
                 lru_remove(cache, block);
                 lru_add_head(cache, block);
@@ -154,34 +160,19 @@ int cache_get_block(struct cache* cache, unsigned long long pos, void** pptr) {
                 lock_release(&cache->lock);
                 return 0;
             }
-
-            /* block is being loaded by another thread; wait for it without
-               holding the cache lock (yielding to the loader). This avoids
-               deadlock because condition_wait does not atomically release
-               the cache lock. */
-            while (block->loading) {
-                lock_release(&cache->lock);
-                running_thread_yield();
-                lock_acquire(&cache->lock);
-                /* re-find block in case cache changed while we yielded */
-                block = find_block(cache, pos);
-                if (block == NULL) break;
-            }
-
-            /* after wakeup/yield, loop to re-check */
-            continue;
+            /* If we get here, block exists but is neither loading nor valid - shouldn't happen */
+            /* Fall through to allocate new block */
         }
 
-        /* Not present. Try to find a free block */
+        /* Block not in cache - need to allocate and load it */
         freeb = get_free_block(cache);
         if (freeb == NULL) {
-            /* Need to evict; evict_block expects caller to hold lock */
+            /* No free blocks - try to evict */
             int er = evict_block(cache);
             if (er != 0) {
                 lock_release(&cache->lock);
                 return er;
             }
-            /* Try again for a free block */
             freeb = get_free_block(cache);
             if (freeb == NULL) {
                 lock_release(&cache->lock);
@@ -189,14 +180,17 @@ int cache_get_block(struct cache* cache, unsigned long long pos, void** pptr) {
             }
         }
 
-        /* Reserve the block for loading */
+        /* Mark block as being loaded */
         freeb->loading = 1;
         freeb->pos = pos;
         freeb->valid = 0;
-        freeb->refcnt = 1; /* caller holds one ref */
+        freeb->dirty = 0;
+        freeb->refcnt = 1; /* Caller will hold one reference */
+        
+        /* Release lock while performing I/O */
         lock_release(&cache->lock);
 
-        /* Allocate buffer and fetch while not holding lock */
+        /* Allocate buffer for data */
         buf = kmalloc(CACHE_BLKSZ);
         if (buf == NULL) {
             lock_acquire(&cache->lock);
@@ -207,6 +201,7 @@ int cache_get_block(struct cache* cache, unsigned long long pos, void** pptr) {
             return -ENOMEM;
         }
 
+        /* Fetch data from backing storage */
         result = storage_fetch(cache->disk, pos, buf, CACHE_BLKSZ);
         if (result != CACHE_BLKSZ) {
             kfree(buf);
@@ -218,21 +213,28 @@ int cache_get_block(struct cache* cache, unsigned long long pos, void** pptr) {
             return -EIO;
         }
 
-        /* Install block into cache */
+        /* Re-acquire lock and finalize block */
         lock_acquire(&cache->lock);
-        freeb->data = buf;
-        freeb->dirty = 0;
-        freeb->valid = 1;
-        freeb->loading = 0;
-        cache->used++;
-        lru_add_head(cache, freeb);
-        condition_broadcast(&cache->cond);
-        *pptr = freeb->data;
-        lock_release(&cache->lock);
-        return 0;
+        
+        /* Check if block is still ours (paranoid check) */
+        if (freeb->loading && freeb->pos == pos) {
+            freeb->data = buf;
+            freeb->valid = 1;
+            freeb->loading = 0;
+            cache->used++;
+            lru_add_head(cache, freeb);
+            condition_broadcast(&cache->cond);
+            *pptr = freeb->data;
+            lock_release(&cache->lock);
+            return 0;
+        } else {
+            /* Something went wrong - clean up */
+            kfree(buf);
+            lock_release(&cache->lock);
+            return -EIO;
+        }
     }
 }
-
 /**
  * @brief Releases a block previously obtained from cache_get_block().
  * @param cache Pointer to the cache.
@@ -250,30 +252,38 @@ void cache_release_block(struct cache* cache, void* pblk, int dirty) {
 
     lock_acquire(&cache->lock);
 
-    /* Find the block containing this data */
+    /* Find the block containing this data pointer */
     for (i = 0; i < CACHE_CAPACITY; i++) {
-        if (cache->blocks[i].data == pblk && cache->blocks[i].valid) {
+        if (cache->blocks[i].valid && 
+            cache->blocks[i].data == pblk) {
             block = &cache->blocks[i];
             break;
         }
     }
 
     if (block == NULL) {
+        /* Block not found - this shouldn't happen but handle gracefully */
         lock_release(&cache->lock);
         return;
     }
 
-    /* Update dirty flag */
-    if (dirty) block->dirty = 1;
+    /* Mark dirty if requested (only set, never clear) */
+    if (dirty) {
+        block->dirty = 1;
+    }
 
-    /* Decrement user reference */
-    if (block->refcnt > 0) block->refcnt--;
+    /* Decrement reference count */
+    if (block->refcnt > 0) {
+        block->refcnt--;
+        
+        /* Only move in LRU if refcnt reaches 0 (no longer in active use) */
+        if (block->refcnt == 0) {
+            lru_remove(cache, block);
+            lru_add_head(cache, block);
+        }
+    }
 
-    /* Move to head of LRU list (most recently used) */
-    lru_remove(cache, block);
-    lru_add_head(cache, block);
-
-    /* Wake any waiters (evict or other getters) */
+    /* Wake any threads waiting for blocks to become available */
     condition_broadcast(&cache->cond);
 
     lock_release(&cache->lock);
@@ -288,41 +298,49 @@ int cache_flush(struct cache* cache) {
     struct cache_block* block;
     long result;
     int i;
+    int error = 0;
 
     if (cache == NULL) return -EINVAL;
 
+    /* Flush all dirty blocks */
     for (i = 0; i < CACHE_CAPACITY; i++) {
         lock_acquire(&cache->lock);
         block = &cache->blocks[i];
 
-        if (!(block->valid && block->dirty && !block->loading)) {
+        /* Skip if not dirty or not valid */
+        if (!block->valid || !block->dirty || block->loading) {
             lock_release(&cache->lock);
             continue;
         }
 
-        /* mark block busy for writeback */
-        block->loading = 1;
-        void* data_ptr = block->data;
-        unsigned long long pos = block->pos;
-        lock_release(&cache->lock);
-
-        result = storage_store(cache->disk, pos, data_ptr, CACHE_BLKSZ);
-        if (result != CACHE_BLKSZ) {
-            /* restore loading flag and return error */
-            lock_acquire(&cache->lock);
-            block->loading = 0;
-            lock_release(&cache->lock);
-            return -EIO;
+        /* Wait for block to have no users */
+        while (block->refcnt > 0) {
+            condition_wait(&cache->cond);
         }
 
+        /* Mark as being written back */
+        block->loading = 1;
+        void* data_copy = block->data;
+        unsigned long long pos_copy = block->pos;
+        lock_release(&cache->lock);
+
+        /* Perform write without holding lock */
+        result = storage_store(cache->disk, pos_copy, data_copy, CACHE_BLKSZ);
+        
         lock_acquire(&cache->lock);
-        block->dirty = 0;
+        if (result == CACHE_BLKSZ) {
+            /* Success - clear dirty flag */
+            block->dirty = 0;
+        } else {
+            /* Failed - record error but continue flushing other blocks */
+            error = -EIO;
+        }
         block->loading = 0;
         condition_broadcast(&cache->cond);
         lock_release(&cache->lock);
     }
 
-    return 0;
+    return error;
 }
 
 // INTERNAL(HELPER) FUNCTION DEFINITIONS
@@ -427,63 +445,74 @@ static struct cache_block* get_free_block(struct cache* cache) {
  * @return 0 on success, negative error code on error
  */
 static int evict_block(struct cache* cache) {
-    struct cache_block* block = cache->lru_tail;
-    struct cache_block* cand = NULL;
-    void* data_ptr = NULL;
-    unsigned long long pos = 0;
-    int was_dirty = 0;
+    struct cache_block* victim = NULL;
+    struct cache_block* current;
+    void* data_to_write = NULL;
+    unsigned long long pos_to_write = 0;
+    int need_writeback = 0;
     long result;
 
-    /* Find a candidate from the tail that is not in use and not loading */
-    while (block != NULL) {
-        if (block->refcnt == 0 && !block->loading) {
-            cand = block;
+    /* Scan from tail (LRU) to find an evictable block */
+    current = cache->lru_tail;
+    while (current != NULL) {
+        if (current->valid && 
+            current->refcnt == 0 && 
+            !current->loading) {
+            victim = current;
             break;
         }
-        block = block->prev;
+        current = current->prev;
     }
 
-    if (cand == NULL) {
-        return -EBUSY; /* nothing we can evict now */
+    if (victim == NULL) {
+        return -EBUSY; /* No evictable blocks */
     }
 
-    /* Remove from LRU and mark as being evicted */
-    lru_remove(cache, cand);
-    cand->loading = 1; /* mark busy */
-    cand->valid = 0;
+    /* Remove from LRU and prepare for eviction */
+    lru_remove(cache, victim);
+    victim->loading = 1; /* Prevent others from using it */
+
+    /* Check if writeback needed */
+    if (victim->dirty) {
+        need_writeback = 1;
+        data_to_write = victim->data;
+        pos_to_write = victim->pos;
+    }
+
+    /* Clear the block (still holding lock) */
+    void* old_data = victim->data;
+    victim->data = NULL;
+    victim->valid = 0;
+    victim->dirty = 0;
+    victim->pos = 0;
     cache->used--;
 
-    /* Steal metadata */
-    data_ptr = cand->data;
-    pos = cand->pos;
-    was_dirty = cand->dirty;
-
-    /* Clear metadata while we perform I/O without holding the lock */
-    cand->data = NULL;
-    cand->pos = 0;
-    cand->dirty = 0;
-    cand->refcnt = 0;
-    /* Release lock while performing I/O */
+    /* Release lock for I/O */
     lock_release(&cache->lock);
 
-    /* Do write-back if necessary (without holding cache lock) */
-    if (was_dirty && data_ptr != NULL) {
-        result = storage_store(cache->disk, pos, data_ptr, CACHE_BLKSZ);
+    /* Perform writeback if needed */
+    if (need_writeback) {
+        result = storage_store(cache->disk, pos_to_write, data_to_write, CACHE_BLKSZ);
         if (result != CACHE_BLKSZ) {
-            /* Acquire lock to restore loading flag and return error (leave lock held)
-               so caller can decide how to continue. */
+            /* Writeback failed - free memory and return error */
+            kfree(old_data);
             lock_acquire(&cache->lock);
-            cand->loading = 0;
+            victim->loading = 0;
             condition_broadcast(&cache->cond);
+            /* Note: lock remains held for caller */
             return -EIO;
         }
     }
 
-    if (data_ptr != NULL) kfree(data_ptr);
+    /* Free the old buffer */
+    if (old_data != NULL) {
+        kfree(old_data);
+    }
 
+    /* Re-acquire lock and finish */
     lock_acquire(&cache->lock);
-    cand->loading = 0;
+    victim->loading = 0;
     condition_broadcast(&cache->cond);
-    /* Leave lock held for caller */
+    /* Lock remains held for caller */
     return 0;
 }

@@ -15,7 +15,7 @@
 #include "conf.h"
 #include "misc.h"
 #include "assert.h"
-#include "uart.h"
+//#include "uart.h"
 #include "devimpl.h"
 #include "intr.h"
 #include "heap.h"

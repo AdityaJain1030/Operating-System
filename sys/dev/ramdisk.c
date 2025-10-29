@@ -68,28 +68,38 @@ static const struct storage_intf ramdisk_intf = {
  * @return None
  */
 void ramdisk_attach() {
-    // External symbols from linker script for embedded blob data
     extern char _kimg_blob_start[], _kimg_blob_end[];
     struct ramdisk *rd;
-    size_t sz = (size_t)(_kimg_blob_end - _kimg_blob_start);
-    rd = kcalloc(1, sizeof(*rd));
-    if (rd == NULL) return; /* out of memory, silently skip registering */
-    /* If the embedded blob is empty, don't register the device. */
+    size_t sz;
+
+    /* Calculate blob size */
+    sz = (size_t)(_kimg_blob_end - _kimg_blob_start);
+    
+    /* Don't register if no blob present */
     if (sz == 0) {
-        kfree(rd); /* nothing to register */
-        return; /*CHANGED: avoid registering a zero-size ramdisk */
+        return; /* No blob to attach */
     }
 
-    /* Point to the linker-provided blob (no copy). The blob should be
-     * located in the binary image (read-only region). */
+    /* Allocate ramdisk structure */
+    rd = kcalloc(1, sizeof(*rd));
+    if (rd == NULL) {
+        /* Log error but don't panic */
+        kprintf("ramdisk_attach: Failed to allocate memory\n");
+        return;
+    }
+
+    /* Initialize ramdisk with blob data */
     rd->buf = (void *)_kimg_blob_start;
     rd->size = sz;
 
-    /* Initialize the generic storage fields (intf pointer and capacity). */
+    /* Initialize storage interface */
     storage_init(&rd->storage, &ramdisk_intf, (unsigned long long)sz);
 
-    /* Register the device so higher-level code can find it by name. */
-    register_device(RAMDISK_NAME, DEV_STORAGE, rd);
+    /* Register the device */
+    if (register_device(RAMDISK_NAME, DEV_STORAGE, rd) != 0) {
+        kfree(rd);
+        kprintf("ramdisk_attach: Failed to register device\n");
+    }
 }
 
 // INTERNAL FUNCTION DEFINITIONS
@@ -141,21 +151,40 @@ static long ramdisk_fetch(struct storage *sto, unsigned long long pos, void *buf
     unsigned long long avail;
     unsigned long long tocopy;
 
-    if (sto == NULL || buf == NULL) return -EINVAL;
+    /* Validate parameters */
+    if (sto == NULL || buf == NULL) {
+        return -EINVAL;
+    }
 
     rd = (struct ramdisk *)sto;
 
-    if (pos >= rd->size) return 0; /* EOF */
+    /* Validate ramdisk state */
+    if (rd->buf == NULL || rd->size == 0) {
+        return -EINVAL;
+    }
 
+    /* Check for EOF */
+    if (pos >= rd->size) {
+        return 0; /* EOF */
+    }
+
+    /* Calculate available bytes */
     avail = rd->size - pos;
+    
+    /* Determine copy size (prevent overflow) */
     tocopy = (unsigned long long)bytecnt;
-    if (tocopy > avail) tocopy = avail;
+    if (tocopy > avail) {
+        tocopy = avail;
+    }
 
-    /* Copy from the blob into the caller's buffer. The device uses
-     * byte-granular addressing (blksz==1), so pos is a byte offset. */
+    /* Ensure tocopy fits in size_t for memcpy */
+    if (tocopy > SIZE_MAX) {
+        tocopy = SIZE_MAX;
+    }
+
+    /* Perform the copy */
     memcpy(buf, (char *)rd->buf + pos, (size_t)tocopy);
 
-    /* Return the number of bytes delivered; 0 indicates EOF. */
     return (long)tocopy;
 }
 
@@ -171,23 +200,40 @@ static long ramdisk_fetch(struct storage *sto, unsigned long long pos, void *buf
  * @return 0 on success, error on failure or unsupported command
  */
 static int ramdisk_cntl(struct storage *sto, int cmd, void *arg) {
-    if (sto == NULL) return -EINVAL;
+    struct ramdisk *rd;
 
-    /* Many control operations write results via pointers passed in `arg`.
-     * FCNTL_GETEND expects an unsigned long long* pointing to receive the
-     * device capacity in bytes. */
+    if (sto == NULL) {
+        return -EINVAL;
+    }
+
+    rd = (struct ramdisk *)sto;
+
     switch (cmd) {
     case FCNTL_GETEND: {
-        unsigned long long *endp = (unsigned long long *)arg;
-        if (endp == NULL) return -EINVAL;
-        *endp = sto->capacity; /* write capacity through caller pointer */
+        unsigned long long *endp;
+        
+        if (arg == NULL) {
+            return -EINVAL;
+        }
+        
+        endp = (unsigned long long *)arg;
+        
+        /* Verify storage capacity is valid */
+        if (rd->storage.capacity == 0 || rd->storage.capacity > rd->size) {
+            return -EINVAL;
+        }
+        
+        *endp = rd->storage.capacity;
         return 0;
     }
+    
     case FCNTL_MMAP:
-        /* mmap not supported for the embedded blob-backed ramdisk */
-        kprintf("MMAP is not a supported yet\n");
+        /* Not supported per requirements */
+        kprintf("MMAP is not supported yet\n");
         return -ENOTSUP;
+        
     default:
+        /* Unsupported command */
         return -ENOTSUP;
     }
 }
