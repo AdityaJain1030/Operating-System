@@ -11,7 +11,8 @@
 #include "string.h"
 #include "thread.h"
 #include "devimpl.h"
-#include "assert.h"
+// #include "assert.h" hotfix deet
+#include "misc.h"
 #include "conf.h"
 #include "intr.h"
 #include "console.h"
