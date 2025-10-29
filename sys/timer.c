@@ -16,6 +16,7 @@
 #include "timer.h"
 #include "thread.h"
 #include "riscv.h"
+#include "misc.h"
 #include "assert.h"
 #include "intr.h"
 #include "conf.h"

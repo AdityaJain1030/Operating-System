@@ -18,6 +18,8 @@
 
 #include <stdint.h>
 
+#include "misc.h"
+
 // INTERNAL MACRO DEFINITIONS
 //
 
