@@ -35,6 +35,7 @@
  * is therefore treated as read-only (no store implementation).
  */
 struct ramdisk {
+    // STORAGE MUST BE FIRST PARAMETER BECAUSE OF HOW WE ARE DOING CASTING. DO NOT MODIFY
     struct storage storage;  ///< Storage struct of memory storage
     void *buf;               ///< Block of memory
     size_t size;             ///< Size of memory block
@@ -114,7 +115,7 @@ static int ramdisk_open(struct storage *sto) {
     struct ramdisk *rd;
 
     if (sto == NULL) return -EINVAL;
-
+    // can we just delete the rest of this function?
     /* storage is the first member; cast back to ramdisk */
     rd = (struct ramdisk *)sto;
     /* The `storage` object is embedded at the start of `struct ramdisk`,
@@ -132,6 +133,7 @@ static int ramdisk_open(struct storage *sto) {
 static void ramdisk_close(struct storage *sto) {
     /*CHANGED: if sto is NULL, return immediately (defensive). No resources to
      * release for the embedded blob-backed ramdisk otherwise. */
+     // same here
     if (sto == NULL) return;
     return;
 }
@@ -156,7 +158,7 @@ static long ramdisk_fetch(struct storage *sto, unsigned long long pos, void *buf
         return -EINVAL;
     }
 
-    rd = (struct ramdisk *)sto;
+    rd = (struct ramdisk *)sto; // make sure not to edit ordering of ramdisk pretty please
 
     /* Validate ramdisk state */
     if (rd->buf == NULL || rd->size == 0) {
@@ -208,6 +210,17 @@ static int ramdisk_cntl(struct storage *sto, int cmd, void *arg) {
 
     rd = (struct ramdisk *)sto;
 
+    // switch statements make the asm a bit harder to debug wrt locks n stuff... may refactor to if as we dont need to support more 
+    // misc commands
+    // if (cmd == FCNTL_GETEND)
+    // {
+    //     if (arg == NULL) return -EINVAL;
+    //     if (rd->) .. do stuff here. We dont need to support any other switches 
+    // }
+    // else {
+    //     kprintf("Operation %d is not supported yet\n", cmd);
+    //     return -EINVAL;
+    // }
     switch (cmd) {
     case FCNTL_GETEND: {
         unsigned long long *endp;
@@ -219,7 +232,7 @@ static int ramdisk_cntl(struct storage *sto, int cmd, void *arg) {
         endp = (unsigned long long *)arg;
         
         /* Verify storage capacity is valid */
-        if (rd->storage.capacity == 0 || rd->storage.capacity > rd->size) {
+        if (rd->storage.capacity == 0 || rd->storage.capacity > rd->size) { // shouldnt we return zero here for cap = 0?
             return -EINVAL;
         }
         
