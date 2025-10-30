@@ -50,29 +50,32 @@
 
 //VIOBLK device structure
 
+struct vioblk_header
+{
+    uint32_t type;
+    uint32_t reserved;
+    uint64_t sector;
+};
+
 struct vioblk_storage {
     struct storage base;
     volatile struct virtio_mmio_regs * regs;
     int irqno;
-    char opened;
+    int opened;                             // tracks open/close state
 
-    struct virtq_desc *desc;
-    struct virtq_avail *avail;
-    struct virtq_used *used;
-    unsigned int queue_size;     // Number of descriptors in the queue
-    uint16_t next_desc_idx;  // Next free descriptor index
+    //pointers for alignment, we dont clean these up
+    struct virtq_desc* desc;                 // assume size one
+    struct virtq_avail* avail;               // available ring
+    struct virtq_used* used;                 // used ring
+    unsigned int virtqueue_size;             // always 3
 
-    // Per-request data, protected by the lock
-    // Must be physically contiguous memory (not on stack) for DMA
-    struct {
-        uint32_t type;
-        uint32_t reserved;
-        uint64_t sector;
-    } req_header;
-    uint8_t req_status;
-
-    struct condition ready;
+    struct condition ready;                  //< signalled when ready
     struct lock lock;
+
+    // protect these with lock as well
+    struct vioblk_header header;
+    int status;
+
 };
 
 // VirtIO block device feature bits (number, *not* mask)
@@ -100,92 +103,189 @@ static long vioblk_storage_store(struct storage* sto, unsigned long long pos, co
 static int vioblk_storage_cntl(struct storage* sto, int op, void* arg);
 static void vioblk_isr(int irqno, void* aux);
 
-static const struct storage_intf vioblk_storage_intf = {
-    .blksz = 512, // Default, will be overridden in attach by a dynamic intf
-    .open = &vioblk_storage_open,
-    .close = &vioblk_storage_close,
-    .fetch = &vioblk_storage_fetch,
-    .store = &vioblk_storage_store,
-    .cntl = &vioblk_storage_cntl
-};
+// INTERNAL GLOBAL VARIABLES
+//
 
 // INTERNAL FUNCTION DECLARATIONS
 //
 
-static long vioblk_helper(struct storage* sto, unsigned long long pos, const void* buf,
-                           unsigned long bytecnt, int is_write) {
+static void fill_descriptor_table(struct virtq_desc* desc, const struct vioblk_header* header, const void * buf, const unsigned long bytecnt, const int* status, const int is_read)
+{
+    // Fill descriptor 1 (header)
+    desc[0].addr = (uintptr_t)header;
+    desc[0].len = sizeof(*header);
+    desc[0].flags = VIRTQ_DESC_F_NEXT;
+    desc[0].next = 1;
+
+    // Fill descriptor 2 (data)
+    desc[1].addr = (uintptr_t)buf;
+    desc[1].len = bytecnt;
+    desc[1].flags = VIRTQ_DESC_F_NEXT;
+    if (is_read) {
+        // Device will WRITE to this buffer
+        desc[1].flags |= VIRTQ_DESC_F_WRITE;
+    }
+    desc[1].next = 2;
+
+    // Fill descriptor 3 (status)
+    desc[2].addr = (uintptr_t)status;
+    desc[2].len = sizeof(*status);
+    desc[2].flags = VIRTQ_DESC_F_WRITE; // next is not set and write is
+}
+
+static struct storage_intf* get_vioblk_storage_intf(int blksz)
+{
+    struct storage_intf* out = kmalloc(sizeof(struct storage_intf));
+    out->blksz = blksz;
+    out->open = &vioblk_storage_open;
+    out->close = &vioblk_storage_close;
+    out->fetch = &vioblk_storage_fetch;
+    out->store = &vioblk_storage_store;
+    out->cntl = &vioblk_storage_cntl;
+
+    return out;
+}
+
+static int vioblk_storage_open(struct storage* sto) {
+    if (sto == NULL) return -EINVAL;
+    struct vioblk_storage * const blk =
+        (void*)sto - offsetof(struct vioblk_storage, base);
+
+    if (blk->opened) return -EBUSY;
+
+    //figure out what device stuff we need to do
+    blk->opened = 1;
+    enable_intr_source(blk->irqno, VIORNG_INTR_PRIO, &vioblk_isr, blk);
+    
+    // Write 0x1 to QueueReady.
+    virtio_enable_virtq(blk->regs, 0);
+    // FIXME your code goes here
+    return 0;
+}
+
+static void vioblk_storage_close(struct storage* sto) {
+    if (sto == NULL) return;
+    struct vioblk_storage * const blk =
+        (void*)sto - offsetof(struct vioblk_storage, base);
+
+    if (!blk->opened) return;
+    blk->opened = 0;
+    disable_intr_source(blk->irqno); //disable in plic
+    virtio_reset_virtq(blk->regs, 0); //reset virtq, dunno what it sets lowks
+
+    // we should not free in case of re-open
+    // kfree((void*)blk->desc);
+    // kfree((void*)blk->avail);
+    // kfree((void*)blk->used);
+    // kfree((void*)sto->intf);
+}
+
+static long vioblk_storage_fetch(struct storage* sto, unsigned long long pos, void* buf,
+                                 unsigned long bytecnt) {
+    // FIXME
     struct vioblk_storage * const blk =
         (void*)sto - offsetof(struct vioblk_storage, base);
 
     if (!blk->opened) return -EINVAL;
     if (bytecnt == 0) return 0;
-    
-    // Per spec 5.2.4, sector addressing is *always* 512 bytes.
-    // The storage_uio layer ensures pos and bytecnt are aligned to blk->base.intf->blksz.
-    // We assume blksz is a multiple of 512.
-    uint64_t sector = pos / 512;
 
+    // [10/21 15:17] In vioblk_storage_store and vioblk_storage_fetch, writes & reads whose bytecnt are not a multiple of blksz should be rounded down to the nearest blksz. The number of bytes written & read should equal the return value.
+    bytecnt /= sto->intf->blksz;
+    bytecnt *= sto->intf->blksz;
+    
+    //fill header
+    uint64_t sector = pos / 512; // 5.2.6
+    blk->header.sector = sector;
+    blk->header.reserved = 0;
+    blk->header.type = VIRTIO_BLK_T_IN;
+
+    // [10/21 07:04] For vioblk_storage_store and vioblk_storage_fetch, writes & reads that exceed the end of the block device should be truncated. Do not return a negative error code in these scenarios.
+    if (pos + bytecnt > sto->capacity) bytecnt = sto->capacity - pos;
+    
     lock_acquire(&blk->lock);
 
-    // We need a chain of 3 descriptors.
-    // The lock ensures only one request is in-flight, so we can use
-    // next_desc_idx to get 3 consecutive descriptors.
-    uint16_t head_idx = blk->next_desc_idx;
-    uint16_t data_idx = (head_idx + 1) % blk->queue_size;
-    uint16_t stat_idx = (head_idx + 2) % blk->queue_size;
-
-    // 1. Fill request header
-    blk->req_header.type = is_write ? VIRTIO_BLK_T_OUT : VIRTIO_BLK_T_IN;
-    blk->req_header.reserved = 0;
-    blk->req_header.sector = sector;
-
-    // 2. Fill descriptor 1 (header)
-    blk->desc[head_idx].addr = (uintptr_t)&blk->req_header;
-    blk->desc[head_idx].len = sizeof(blk->req_header);
-    blk->desc[head_idx].flags = VIRTQ_DESC_F_NEXT;
-    blk->desc[head_idx].next = data_idx;
-
-    // 3. Fill descriptor 2 (data)
-    blk->desc[data_idx].addr = (uintptr_t)buf;
-    blk->desc[data_idx].len = bytecnt;
-    blk->desc[data_idx].flags = VIRTQ_DESC_F_NEXT;
-    if (!is_write) {
-        // Device will WRITE to this buffer
-        blk->desc[data_idx].flags |= VIRTQ_DESC_F_WRITE;
-    }
-    blk->desc[data_idx].next = stat_idx;
-
-    // 4. Fill descriptor 3 (status)
-    blk->desc[stat_idx].addr = (uintptr_t)&blk->req_status;
-    blk->desc[stat_idx].len = sizeof(blk->req_status);
-    blk->desc[stat_idx].flags = VIRTQ_DESC_F_WRITE; // Device will WRITE to this
-    blk->desc[stat_idx].next = 0; // End of chain
-
-    // 5. Add chain head to avail ring
-    volatile uint16_t old_used_idx = blk->used->idx;
-    blk->avail->ring[blk->avail->idx % blk->queue_size] = head_idx;
-    __sync_synchronize(); // Fence before updating idx
+    // fill descriptor table
+    fill_descriptor_table(blk->desc, &blk->header, buf, bytecnt, &blk->status, 1);
+    // Add message to avail ring
+    blk->avail->ring[blk->avail->idx % blk->virtqueue_size] = 0;
     blk->avail->idx++;
-    __sync_synchronize(); // Fence before notifying
 
-    // 6. Notify device
+    // Notify Device
     virtio_notify_avail(blk->regs, 0);
-
-    // 7. Wait for ISR
+    
+    // wait for response
     int pie = disable_interrupts();
-    while (old_used_idx == blk->used->idx) {
+    while (blk->avail->idx != blk->used->idx) 
         condition_wait(&blk->ready);
-    }
     restore_interrupts(pie);
 
-    // 8. Request is done. Update our descriptor index for the next request.
-    blk->next_desc_idx = (stat_idx + 1) % blk->queue_size;
-
-    // 9. Check status and release lock
-    long ret_val = (blk->req_status == VIRTIO_BLK_S_OK) ? (long)bytecnt : -EINVAL;
     lock_release(&blk->lock);
+    return bytecnt;
+}
+
+static long vioblk_storage_store(struct storage* sto, unsigned long long pos, const void* buf,
+                                 unsigned long bytecnt) {
+    // FIXME
+    struct vioblk_storage * const blk =
+        (void*)sto - offsetof(struct vioblk_storage, base);
+
+    if (!blk->opened) return -EINVAL;
+    if (bytecnt == 0) return 0;
+    if (pos > sto->capacity) return -EINVAL;
+
+    // [10/21 15:17] In vioblk_storage_store and vioblk_storage_fetch, writes & reads whose bytecnt are not a multiple of blksz should be rounded down to the nearest blksz. The number of bytes written & read should equal the return value.
+    bytecnt /= sto->intf->blksz;
+    bytecnt *= sto->intf->blksz;
     
-    return ret_val;
+    //fill header
+    uint64_t sector = pos / 512; // 5.2.6
+    blk->header.sector = sector;
+    blk->header.reserved = 0;
+    blk->header.type = VIRTIO_BLK_T_OUT;
+
+    // [10/21 07:04] For vioblk_storage_store and vioblk_storage_fetch, writes & reads that exceed the end of the block device should be truncated. Do not return a negative error code in these scenarios.
+    if (pos + bytecnt > sto->capacity) bytecnt = sto->capacity - pos;
+    
+    lock_acquire(&blk->lock);
+
+    // fill descriptor table
+    fill_descriptor_table(blk->desc, &blk->header, buf, bytecnt, &blk->status, 0);
+    // Add message to avail ring
+    blk->avail->ring[blk->avail->idx % blk->virtqueue_size] = 0;
+    blk->avail->idx++;
+
+    // Notify Device
+    virtio_notify_avail(blk->regs, 0);
+    
+    // wait for response
+    int pie = disable_interrupts();
+    while (blk->avail->idx != blk->used->idx) 
+        condition_wait(&blk->ready);
+    restore_interrupts(pie);
+
+    lock_release(&blk->lock);
+    return bytecnt;
+}
+
+static int vioblk_storage_cntl(struct storage* sto, int op, void* arg) {
+    // FIXME
+    struct vioblk_storage * const blk = (void*)sto - offsetof(struct vioblk_storage, base);
+
+    if (op == FCNTL_GETEND) {
+        if (arg == NULL) return -EINVAL;
+        *(unsigned long long*)arg = blk->base.capacity;
+        return 0;
+    }
+    else {
+        return -ENOTSUP;
+    }
+}
+
+static void vioblk_isr(int irqno, void* aux) {
+    struct vioblk_storage * const blk = aux;
+    blk->regs->interrupt_ack = blk->regs->interrupt_status;
+
+    condition_broadcast(&blk->ready);
 }
 
 // EXPORTED FUNCTION DEFINITIONS
@@ -253,104 +353,52 @@ void vioblk_attach(volatile struct virtio_mmio_regs* regs, int irqno) {
     // Notify the device about the queue size by writing the size to QueueNum.
     // Write physical addresses of the queue’s Descriptor Area, Driver Area and Device Area to (respectively) the QueueDescLow/QueueDescHigh, QueueDriverLow/QueueDriverHigh and QueueDeviceLow/QueueDeviceHigh register pairs.
     // Write 0x1 to QueueReady.
+
+    //allocate driver memory
     blk = kcalloc(1, sizeof(*blk));
     blk->regs = regs;
     blk->irqno = irqno;
     blk->opened = 0;
     condition_init(&blk->ready, "vioblk.ready");
     lock_init(&blk->lock);
-
-
-    regs->queue_sel = 0;
-    blk->queue_size = 32;
-    blk->next_desc_idx = 0;
+    blk->virtqueue_size = 3;
     
+    // Select the queue writing its index (first queue is 0) to QueueSel.
+    regs->queue_sel = 0;
+    
+    // Check if the queue is not already in use: read QueueReady, and expect a returned value of zero (0x0).
+    if (regs->queue_ready != 0) {
+        kprintf("regs->queue_ready is nonzero, queue already in use. initialization failed\n");
+        return;
+    }
+    // Read maximum queue size (number of elements) from QueueNumMax. If the returned value is zero (0x0) the queue is not available.
+    if (regs->queue_num_max == 0) {
+        kprintf("regs->queue_num_max is zero, queue already in use. initialization failed\n");
+        return;
+    }
+    
+    // blk->next_desc_idx = 0;
+    
+    // Allocate and zero the queue memory, making sure the memory is physically contiguous.
+    //altg alex lin the goat 
     uintptr_t ptr;
-    ptr = (uintptr_t)kcalloc(16 * blk->queue_size + 15, 1);
+    ptr = (uintptr_t)kcalloc(16 * (blk->virtqueue_size) + 15, 1);
     blk->desc = (void*)((ptr + 15) & ~15);
 
-    ptr = (uintptr_t)kcalloc(6 + 2 * blk->queue_size + 1, 1);
+    ptr = (uintptr_t)kcalloc(6 + 2 * blk->virtqueue_size + 1, 1);
     blk->avail = (void*)((ptr + 1) & ~1);
 
-    ptr = (uintptr_t)kcalloc(6 + 8 * blk->queue_size + 3, 1);
+    ptr = (uintptr_t)kcalloc(6 + 8 * blk->virtqueue_size + 3, 1);
     blk->used = (void*)((ptr + 3) & ~3);
 
-    regs->queue_num = blk->queue_size;
-    virtio_attach_virtq(regs, 0, blk->queue_size, (uint64_t)blk->desc, (uint64_t)blk->used, (uint64_t)blk->avail);
+    // Notify the device about the queue size by writing the size to QueueNum.
+    // Write physical addresses of the queue’s Descriptor Area, Driver Area and Device Area to (respectively) the QueueDescLow/QueueDescHigh, QueueDriverLow/QueueDriverHigh and QueueDeviceLow/QueueDeviceHigh register pairs.
+    virtio_attach_virtq(regs, 0, blk->virtqueue_size, (uint64_t)blk->desc, (uint64_t)blk->used, (uint64_t)blk->avail);
 
-    struct storage_intf* intf = kmalloc(sizeof(*intf));
-    *intf = vioblk_storage_intf;
-    intf->blksz = blksz;
-
-    long long capacity = (long long)regs->config.blk.capacity * 512;
-    storage_init(&blk->base, intf, capacity);
-
+    // driver init and registration
+    long long capacity = (long long)regs->config.blk.capacity * 512; // 5.2.4
+    storage_init(&blk->base, get_vioblk_storage_intf(blksz), capacity);
     register_device(VIOBLK_NAME, DEV_STORAGE, &blk->base);
 
     regs->status |= VIRTIO_STAT_DRIVER_OK;
-}
-
-static int vioblk_storage_open(struct storage* sto) {
-    if (sto == NULL) return -EINVAL;
-    struct vioblk_storage * const blk =
-        (void*)sto - offsetof(struct vioblk_storage, base);
-
-    if (blk->opened) return -EBUSY;
-
-    //figure out what device stuff we need to do
-    blk->opened = 1;
-    enable_intr_source(blk->irqno, VIORNG_INTR_PRIO, &vioblk_isr, blk);
-    virtio_enable_virtq(blk->regs, 0);
-    // FIXME your code goes here
-    return 0;
-}
-
-static void vioblk_storage_close(struct storage* sto) {
-    if (sto == NULL) return;
-    struct vioblk_storage * const blk =
-        (void*)sto - offsetof(struct vioblk_storage, base);
-
-    if (!blk->opened) return;
-    blk->opened = 0;
-    disable_intr_source(blk->irqno); //disable in plic
-    virtio_reset_virtq(blk->regs, 0); //reset virtq, dunno what it sets lowks
-
-    // kfree((void*)blk->desc);
-    // kfree((void*)blk->avail);
-    // kfree((void*)blk->used);
-    // kfree((void*)sto->intf);
-}
-
-static long vioblk_storage_fetch(struct storage* sto, unsigned long long pos, void* buf,
-                                 unsigned long bytecnt) {
-    // FIXME
-    return vioblk_helper(sto, pos, buf, bytecnt, 0);
-    // return -ENOTSUP;
-}
-
-static long vioblk_storage_store(struct storage* sto, unsigned long long pos, const void* buf,
-                                 unsigned long bytecnt) {
-    // FIXME
-    return vioblk_helper(sto, pos, buf, bytecnt, 1);
-}
-
-static int vioblk_storage_cntl(struct storage* sto, int op, void* arg) {
-    // FIXME
-    struct vioblk_storage * const blk = (void*)sto - offsetof(struct vioblk_storage, base);
-
-    if (op == FCNTL_GETEND) {
-        if (arg == NULL) return -EINVAL;
-        *(unsigned long long*)arg = blk->base.capacity;
-        return 0;
-    }
-    else {
-            return -ENOTSUP;
-    }
-}
-
-static void vioblk_isr(int irqno, void* aux) {
-    struct vioblk_storage * const blk = aux;
-    blk->regs->interrupt_ack = blk->regs->interrupt_status;
-
-    condition_broadcast(&blk->ready);
 }

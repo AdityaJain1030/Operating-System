@@ -122,12 +122,8 @@ void ramdisk_attach() {
 static int ramdisk_open(struct storage *sto) {
     struct ramdisk *rd;
 
-    trace("%s(%p)", __func__, sto);
-
-    if (sto == NULL) {
-        return -EINVAL;
-    }
-
+    if (sto == NULL) return -EINVAL;
+    // can we just delete the rest of this function?
     /* storage is the first member; cast back to ramdisk */
     rd = (struct ramdisk *)sto;
     
@@ -189,7 +185,7 @@ static long ramdisk_fetch(struct storage *sto, unsigned long long pos, void *buf
         return -EINVAL;
     }
 
-    rd = (struct ramdisk *)sto;
+    rd = (struct ramdisk *)sto; // make sure not to edit ordering of ramdisk pretty please
 
     /* Check if device is opened */
     if (!rd->opened) {
@@ -258,6 +254,17 @@ static int ramdisk_cntl(struct storage *sto, int cmd, void *arg) {
         return -EINVAL;
     }
 
+    // switch statements make the asm a bit harder to debug wrt locks n stuff... may refactor to if as we dont need to support more 
+    // misc commands
+    // if (cmd == FCNTL_GETEND)
+    // {
+    //     if (arg == NULL) return -EINVAL;
+    //     if (rd->) .. do stuff here. We dont need to support any other switches 
+    // }
+    // else {
+    //     kprintf("Operation %d is not supported yet\n", cmd);
+    //     return -EINVAL;
+    // }
     switch (cmd) {
     case FCNTL_GETEND: {
         if (arg == NULL) {
@@ -268,6 +275,10 @@ static int ramdisk_cntl(struct storage *sto, int cmd, void *arg) {
         *(unsigned long long *)arg = rd->storage.capacity;
         
         debug("ramdisk_cntl: FCNTL_GETEND returns %llu", rd->storage.capacity);
+        /* Verify storage capacity is valid */
+        if (rd->storage.capacity == 0 || rd->storage.capacity > rd->size) { // shouldnt we return zero here for cap = 0?
+            return -EINVAL;
+        }
         
         return 0;
     }
