@@ -71,6 +71,11 @@ struct vioblk_storage {
 
     struct condition ready;                  //< signalled when ready
     struct lock lock;
+
+    // protect these with lock as well
+    struct vioblk_header header;
+    int status;
+
 };
 
 // VirtIO block device feature bits (number, *not* mask)
@@ -100,9 +105,6 @@ static void vioblk_isr(int irqno, void* aux);
 
 // INTERNAL GLOBAL VARIABLES
 //
-static struct vioblk_header header;
-static int status;
-
 
 // INTERNAL FUNCTION DECLARATIONS
 //
@@ -192,7 +194,7 @@ static long vioblk_storage_fetch(struct storage* sto, unsigned long long pos, vo
     bytecnt *= sto->intf->blksz;
     
     //fill header
-    uint64_t sector = pos / sto->intf->blksz;
+    uint64_t sector = pos / 512; // 5.2.6
     header.sector = sector;
     header.reserved = 0;
     header.type = VIRTIO_BLK_T_IN;
@@ -236,7 +238,7 @@ static long vioblk_storage_store(struct storage* sto, unsigned long long pos, co
     bytecnt *= sto->intf->blksz;
     
     //fill header
-    uint64_t sector = pos / sto->intf->blksz;
+    uint64_t sector = pos / 512; // 5.2.6
     header.sector = sector;
     header.reserved = 0;
     header.type = VIRTIO_BLK_T_OUT;
