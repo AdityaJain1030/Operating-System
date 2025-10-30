@@ -195,9 +195,9 @@ static long vioblk_storage_fetch(struct storage* sto, unsigned long long pos, vo
     
     //fill header
     uint64_t sector = pos / 512; // 5.2.6
-    header.sector = sector;
-    header.reserved = 0;
-    header.type = VIRTIO_BLK_T_IN;
+    blk->header.sector = sector;
+    blk->header.reserved = 0;
+    blk->header.type = VIRTIO_BLK_T_IN;
 
     // [10/21 07:04] For vioblk_storage_store and vioblk_storage_fetch, writes & reads that exceed the end of the block device should be truncated. Do not return a negative error code in these scenarios.
     if (pos + bytecnt > sto->capacity) bytecnt = sto->capacity - pos;
@@ -205,7 +205,7 @@ static long vioblk_storage_fetch(struct storage* sto, unsigned long long pos, vo
     lock_acquire(&blk->lock);
 
     // fill descriptor table
-    fill_descriptor_table(blk->desc, &header, buf, bytecnt, &status, 1);
+    fill_descriptor_table(blk->desc, &blk->header, buf, bytecnt, &blk->status, 1);
     // Add message to avail ring
     blk->avail->ring[blk->avail->idx % blk->virtqueue_size] = 0;
     blk->avail->idx++;
@@ -239,9 +239,9 @@ static long vioblk_storage_store(struct storage* sto, unsigned long long pos, co
     
     //fill header
     uint64_t sector = pos / 512; // 5.2.6
-    header.sector = sector;
-    header.reserved = 0;
-    header.type = VIRTIO_BLK_T_OUT;
+    blk->header.sector = sector;
+    blk->header.reserved = 0;
+    blk->header.type = VIRTIO_BLK_T_OUT;
 
     // [10/21 07:04] For vioblk_storage_store and vioblk_storage_fetch, writes & reads that exceed the end of the block device should be truncated. Do not return a negative error code in these scenarios.
     if (pos + bytecnt > sto->capacity) bytecnt = sto->capacity - pos;
@@ -249,7 +249,7 @@ static long vioblk_storage_store(struct storage* sto, unsigned long long pos, co
     lock_acquire(&blk->lock);
 
     // fill descriptor table
-    fill_descriptor_table(blk->desc, &header, buf, bytecnt, &status, 0);
+    fill_descriptor_table(blk->desc, &blk->header, buf, bytecnt, &blk->status, 0);
     // Add message to avail ring
     blk->avail->ring[blk->avail->idx % blk->virtqueue_size] = 0;
     blk->avail->idx++;
