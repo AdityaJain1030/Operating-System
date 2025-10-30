@@ -112,7 +112,7 @@ static const struct storage_intf vioblk_storage_intf = {
 // INTERNAL FUNCTION DECLARATIONS
 //
 
-static long vioblk_helper(struct storage* sto, unsigned long long pos, void* buf,
+static long vioblk_helper(struct storage* sto, unsigned long long pos, const void* buf,
                            unsigned long bytecnt, int is_write) {
     struct vioblk_storage * const blk =
         (void*)sto - offsetof(struct vioblk_storage, base);
