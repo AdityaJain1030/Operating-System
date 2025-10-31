@@ -65,11 +65,11 @@ void ramdisk_attach() {
     sz = (size_t)(_kimg_blob_end - _kimg_blob_start);
     
     if (sz == 0) {
-        debug("ramdisk_attach: No blob data available");
-        return;
+        kprintf("ramdisk_attach: No blob data available\n");
+        return; /* No blob to attach */
     }
 
-    debug("ramdisk_attach: Found blob of size %lu bytes", (unsigned long)sz);
+    kprintf("ramdisk_attach: Found blob of size %lu bytes", (unsigned long)sz);
 
     rd = kcalloc(1, sizeof(*rd));
     if (rd == NULL) {
@@ -87,7 +87,7 @@ void ramdisk_attach() {
         kfree(rd);
         kprintf("ramdisk_attach: Failed to register device\n");
     } else {
-        debug("ramdisk_attach: Successfully registered ramdisk device");
+        kprintf("ramdisk_attach: Successfully registered ramdisk device\n");
     }
 }
 

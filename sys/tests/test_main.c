@@ -15,6 +15,7 @@
 #include "dev/virtio.h"
 #include "timer.h"
 #include "string.h"
+#include "dev/ramdisk.h"
 #include "filesys.h"
 #include "error.h"
 #include "cache.h"
@@ -37,6 +38,8 @@
 
 static void attach_devices(void);
 static void mount_cdrive(void); // mount primary storage device ("C drive")
+static void mount_cdrive_ramdisk(void); // mount primary storage device ("C drive")
+
 
 void main(void) {
     extern char _kimg_end[]; // provided by kernel.ld
@@ -50,7 +53,7 @@ void main(void) {
 
     enable_interrupts();
 
-    mount_cdrive();
+    mount_cdrive_ramdisk();
 
     // Run the testsuite
     run_testsuite_1();
@@ -73,6 +76,46 @@ void attach_devices(void) {
     if (result != 0) {
         kprintf("mount_devfs(%s) failed: %s\n",
             CDEVNAME, error_name(result));
+        halt_failure();
+    }
+}
+
+
+void mount_cdrive_ramdisk(void) {
+    struct storage * hd;
+    struct cache * cache;
+    int result;
+
+    ramdisk_attach();
+    
+    hd = find_storage("ramdisk", CDEVINST);
+
+    if (hd == NULL) {
+        kprintf("Storage device %s%d not found\n", "ramdisk", CDEVINST);
+        halt_failure();
+    }
+
+    result = storage_open(hd);
+
+    if (result != 0) {
+        kprintf("storage_open failed on %s%d: %s\n",
+            "ramdisk", CDEVINST, error_name(result));
+        halt_failure();
+    }
+
+    result = create_cache(hd, &cache);
+
+    if (result != 0) {
+        kprintf("create_cache(%s%d) failed: %s\n",
+            "ramdisk", CDEVINST, error_name(result));
+        halt_failure();
+    }
+
+    result = mount_ktfs("ramdisk", cache);
+
+    if (result != 0) {
+        kprintf("mount_ktfs(%s, cache(%s%d)) failed: %s\n",
+            "ramdisk", CDEVNAME, CDEVINST, error_name(result));
         halt_failure();
     }
 }
