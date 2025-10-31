@@ -5,6 +5,7 @@
 */
 
 #include "devimpl.h"
+#include <stdint.h>
 #ifdef VIOBLK_TRACE
 #define TRACE
 #endif
@@ -74,7 +75,7 @@ struct vioblk_storage {
 
     // protect these with lock as well
     struct vioblk_header header;
-    int status;
+    uint8_t status; // 5.2.4
 
 };
 
@@ -109,11 +110,11 @@ static void vioblk_isr(int irqno, void* aux);
 // INTERNAL FUNCTION DECLARATIONS
 //
 
-static void fill_descriptor_table(struct virtq_desc* desc, const struct vioblk_header* header, const void * buf, const unsigned long bytecnt, const int* status, const int is_read)
+static void fill_descriptor_table(struct virtq_desc* desc, const struct vioblk_header* header, const void * buf, const unsigned long bytecnt, const uint8_t* status, const int is_read)
 {
     // Fill descriptor 1 (header)
     desc[0].addr = (uintptr_t)header;
-    desc[0].len = sizeof(*header);
+    desc[0].len = sizeof(struct vioblk_header);
     desc[0].flags = VIRTQ_DESC_F_NEXT;
     desc[0].next = 1;
 
@@ -129,7 +130,7 @@ static void fill_descriptor_table(struct virtq_desc* desc, const struct vioblk_h
 
     // Fill descriptor 3 (status)
     desc[2].addr = (uintptr_t)status;
-    desc[2].len = sizeof(*status);
+    desc[2].len = sizeof(uint8_t); // 5.2.5 only one byte long
     desc[2].flags = VIRTQ_DESC_F_WRITE; // next is not set and write is
 }
 
@@ -189,27 +190,32 @@ static long vioblk_storage_fetch(struct storage* sto, unsigned long long pos, vo
     if (!blk->opened) return -EINVAL;
     if (bytecnt == 0) return 0;
 
-    // [10/21 15:17] In vioblk_storage_store and vioblk_storage_fetch, writes & reads whose bytecnt are not a multiple of blksz should be rounded down to the nearest blksz. The number of bytes written & read should equal the return value.
-    bytecnt /= sto->intf->blksz;
-    bytecnt *= sto->intf->blksz;
+    if (pos > sto->capacity) return -EINVAL;
     
     //fill header
     uint64_t sector = pos / 512; // 5.2.6
     blk->header.sector = sector;
-    blk->header.reserved = 0;
     blk->header.type = VIRTIO_BLK_T_IN;
 
     // [10/21 07:04] For vioblk_storage_store and vioblk_storage_fetch, writes & reads that exceed the end of the block device should be truncated. Do not return a negative error code in these scenarios.
     if (pos + bytecnt > sto->capacity) bytecnt = sto->capacity - pos;
     
+    // [10/21 15:17] In vioblk_storage_store and vioblk_storage_fetch, writes & reads whose bytecnt are not a multiple of blksz should be rounded down to the nearest blksz. The number of bytes written & read should equal the return value.
+    bytecnt /= sto->intf->blksz;
+    bytecnt *= sto->intf->blksz;
+
+    if (bytecnt == 0) return 0; // for bytecnt < 512
+
     lock_acquire(&blk->lock);
 
     // fill descriptor table
     fill_descriptor_table(blk->desc, &blk->header, buf, bytecnt, &blk->status, 1);
     // Add message to avail ring
     blk->avail->ring[blk->avail->idx % blk->virtqueue_size] = 0;
+    __sync_synchronize(); // 2.7.13
     blk->avail->idx++;
-
+    __sync_synchronize(); // 2.7.13
+    
     // Notify Device
     virtio_notify_avail(blk->regs, 0);
     
@@ -240,7 +246,6 @@ static long vioblk_storage_store(struct storage* sto, unsigned long long pos, co
     //fill header
     uint64_t sector = pos / 512; // 5.2.6
     blk->header.sector = sector;
-    blk->header.reserved = 0;
     blk->header.type = VIRTIO_BLK_T_OUT;
 
     // [10/21 07:04] For vioblk_storage_store and vioblk_storage_fetch, writes & reads that exceed the end of the block device should be truncated. Do not return a negative error code in these scenarios.
@@ -252,8 +257,9 @@ static long vioblk_storage_store(struct storage* sto, unsigned long long pos, co
     fill_descriptor_table(blk->desc, &blk->header, buf, bytecnt, &blk->status, 0);
     // Add message to avail ring
     blk->avail->ring[blk->avail->idx % blk->virtqueue_size] = 0;
+    __sync_synchronize(); // 2.7.13
     blk->avail->idx++;
-
+    __sync_synchronize(); // make sure everything is updated before sending data
     // Notify Device
     virtio_notify_avail(blk->regs, 0);
     
