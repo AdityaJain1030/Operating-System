@@ -13,5 +13,6 @@ int test_simple_ramdisk_uio_read();
 int test_uio_control_ramdisk_read();
 // int test_elf_load_with_ramdisk_uio();
 int test_cache_get_and_release_block();
+int test_simple_ramdisk_read();
 
 #endif // _TESTSUITE_1_H_

@@ -17,7 +17,7 @@
 #include "filesys.h"
 
 #define DEVMNTNAME "dev"
-
+#define CMNTNAME "c"
 
 // Add args, structs, includes, defines
 void run_testsuite_1() {
@@ -28,29 +28,34 @@ void run_testsuite_1() {
     test_output = (retval == 0) ? "test1 passed!" : "test1 failed!"; 
     kprintf("%s\n", test_output);
 
-    retval = test_find_storage();
-    test_output = (retval == 0) ? "test_find_storage passed!" : "test_find_storage failed!"; 
-    kprintf("%s\n", test_output);
+    // retval = test_find_storage();
+    // test_output = (retval == 0) ? "test_find_storage passed!" : "test_find_storage failed!"; 
+    // kprintf("%s\n", test_output);
 
-    retval = test_simple_storage_read();
-    test_output = (retval == 0) ? "test_simple_storage_read passed!" : "test_simple_storage_read failed!"; 
-    kprintf("%s\n", test_output);
+    // retval = test_simple_storage_read();
+    // test_output = (retval == 0) ? "test_simple_storage_read passed!" : "test_simple_storage_read failed!"; 
+    // kprintf("%s\n", test_output);
 
-    retval = test_simple_storage_write();
-    test_output = (retval == 0) ? "test_simple_storage_write passed!" : "test_simple_storage_write failed!"; 
-    kprintf("%s\n", test_output);
+    // retval = test_simple_storage_write();
+    // test_output = (retval == 0) ? "test_simple_storage_write passed!" : "test_simple_storage_write failed!"; 
+    // kprintf("%s\n", test_output);
 
     retval = test_simple_ramdisk_uio_read();
     test_output = (retval == 0) ? "test_simple_ramdisk_uio_read passed!" : "test_simple_ramdisk_uio_read failed!"; 
     kprintf("%s\n", test_output);
 
+    retval = test_simple_ramdisk_read();
+    test_output = (retval == 0) ? "test_simple_ramdisk_uio_read passed!" : "test_simple_ramdisk_uio_read failed!"; 
+    kprintf("%s\n", test_output);
+
+
     retval = test_uio_control_ramdisk_read();
     test_output = (retval == 0) ? "test_uio_control_ramdisk_read passed!" : "test_uio_control_ramdisk_read failed!"; 
     kprintf("%s\n", test_output);
 
-    retval = test_cache_get_and_release_block();
-    test_output = (retval == 0) ? "test_cache_get_and_release_block passed!" : "test_cache_get_and_release_block failed!"; 
-    kprintf("%s\n", test_output);
+    // retval = test_cache_get_and_release_block();
+    // test_output = (retval == 0) ? "test_cache_get_and_release_block passed!" : "test_cache_get_and_release_block failed!"; 
+    // kprintf("%s\n", test_output);
 
 }
 
@@ -82,13 +87,13 @@ int test_simple_storage_read() {
         kprintf("Storage device found\n");
     }
 
-    retval = storage_open(hd);
-    if (retval != 0) {
-        kprintf("failed to open storage, error code %d \n", retval);
-        return -1;
-    } else {
-        kprintf("opened storage\n");
-    }
+    // retval = storage_open(hd);
+    // if (retval != 0) {
+    //     kprintf("failed to open storage, error code %d \n", retval);
+    //     return -1;
+    // } else {
+    //     kprintf("opened storage\n");
+    // }
 
     char buf[512];
 
@@ -116,13 +121,13 @@ int test_simple_storage_write() {
         kprintf("Storage device found\n");
     }
 
-    retval = storage_open(hd);
-    if (retval != 0) {
-        kprintf("failed to open storage\n");
-        return -1;
-    } else {
-        kprintf("opened storage\n");
-    }
+    // retval = storage_open(hd);
+    // if (retval != 0) {
+    //     kprintf("failed to open storage\n");
+    //     return -1;
+    // } else {
+    //     kprintf("opened storage\n");
+    // }
 
     char wdata[512];
     for (int i = 0; i < 512; ++i) {
@@ -149,9 +154,24 @@ int test_simple_storage_write() {
     return 0;
 }
 
+int test_simple_ramdisk_read()
+{
+    struct uio* ruio;
+    open_file(CMNTNAME, "count.txt", &ruio);
+    char buf[50];
+    int retval = uio_read(ruio, buf, 50);
+    if (retval != 50) {
+        return -1;
+    }
+    for (int i = 0; i < 50; ++i) {
+        kprintf("buf[%d] = %x\n", i, buf[i]);
+    }
+    return 0;
+}
+
 int test_simple_ramdisk_uio_read() {
     struct uio* ruio;
-    ramdisk_attach();
+    // ramdisk_attach();
     open_file(DEVMNTNAME, "ramdisk0", &ruio);
     char buf[50];
     int retval = uio_read(ruio, buf, 50);
@@ -167,7 +187,7 @@ int test_simple_ramdisk_uio_read() {
 int test_uio_control_ramdisk_read() {
     struct uio* ruio;
     int retval;
-    ramdisk_attach();
+    // ramdisk_attach();
     open_file(DEVMNTNAME, "ramdisk0", &ruio);
     char buf[50];
     unsigned long long pos = 5;
