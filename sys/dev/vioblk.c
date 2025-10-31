@@ -188,10 +188,6 @@ static long vioblk_storage_fetch(struct storage* sto, unsigned long long pos, vo
 
     if (!blk->opened) return -EINVAL;
     if (bytecnt == 0) return 0;
-
-    // [10/21 15:17] In vioblk_storage_store and vioblk_storage_fetch, writes & reads whose bytecnt are not a multiple of blksz should be rounded down to the nearest blksz. The number of bytes written & read should equal the return value.
-    bytecnt /= sto->intf->blksz;
-    bytecnt *= sto->intf->blksz;
     
     //fill header
     uint64_t sector = pos / 512; // 5.2.6
@@ -202,6 +198,11 @@ static long vioblk_storage_fetch(struct storage* sto, unsigned long long pos, vo
     // [10/21 07:04] For vioblk_storage_store and vioblk_storage_fetch, writes & reads that exceed the end of the block device should be truncated. Do not return a negative error code in these scenarios.
     if (pos + bytecnt > sto->capacity) bytecnt = sto->capacity - pos;
     
+    // [10/21 15:17] In vioblk_storage_store and vioblk_storage_fetch, writes & reads whose bytecnt are not a multiple of blksz should be rounded down to the nearest blksz. The number of bytes written & read should equal the return value.
+    bytecnt /= sto->intf->blksz;
+    bytecnt *= sto->intf->blksz;
+
+
     lock_acquire(&blk->lock);
 
     // fill descriptor table
