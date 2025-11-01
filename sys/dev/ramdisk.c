@@ -69,7 +69,7 @@ void ramdisk_attach() {
         return; /* No blob to attach */
     }
 
-    kprintf("ramdisk_attach: Found blob of size %lu bytes", (unsigned long)sz);
+    kprintf("ramdisk_attach: Found blob of size %lu bytes\n", (unsigned long)sz);
 
     rd = kcalloc(1, sizeof(*rd));
     if (rd == NULL) {
