@@ -31,6 +31,14 @@ void run_testsuite_ramdisk() {
     test_function("read_oob_ramdisk2", test_ramdisk_read_oob2, rd);
 
     test_function("cntl_ramdisk", test_cntl_ramdisk, rd);
+    
+    if(test_function("close_ramdisk", test_close_ramdisk, rd)) return;
+    
+    test_function("cntl_ramdisk_closed", test_cntl_ramdisk_closed, rd);
+    test_function("read_ramdisk_closed", test_read_ramdisk_closed, rd);
+
+    if(test_function("open_after_close_ramdisk", test_open_ramdisk, rd)) return;
+    if(test_function("close_ramdisk", test_close_ramdisk, rd)) return;
 }
 
 int test_attach_ramdisk(va_list ap)
@@ -106,4 +114,32 @@ int test_ramdisk_read_oob2(va_list ap)
     kfree(buf);
     if (len != TEST_BLOB_SIZE - 512) return (int) len;
     return 0;
+}
+
+int test_read_ramdisk_closed(va_list ap)
+{
+    struct storage* rd = va_arg(ap, struct storage*);
+    unsigned long long* buf = kmalloc(sizeof(unsigned long long));
+    int len = storage_fetch(rd, FCNTL_GETEND, buf, 1024);
+    // kprintf("%d \n", *buf);
+    kfree(buf);
+    if (len != -EINVAL) return (int) -1;
+    // if (*buf != TEST_BLOB_SIZE) {
+    //     kprintf("bad buffer size");
+    //     int x = *buf;
+    //     return x;
+    // }
+    return 0;
+}
+
+int test_cntl_ramdisk_closed(va_list ap)
+{
+    struct storage* rd = va_arg(ap, struct storage*);
+    unsigned long long* buf = kmalloc(sizeof(unsigned long long));
+    long len = storage_cntl(rd, FCNTL_GETEND, buf);
+    // kprintf("%d \n", *buf);
+    kfree(buf);
+    if (len != -EINVAL) return -1;
+    return 0;
+
 }

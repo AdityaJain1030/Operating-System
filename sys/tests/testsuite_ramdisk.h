@@ -14,5 +14,7 @@ int test_ramdisk_read_oob(va_list ap);
 int test_ramdisk_read_oob2(va_list ap);
 int test_close_ramdisk(va_list ap);
 int test_cntl_ramdisk(va_list ap);
+int test_cntl_ramdisk_closed(va_list ap);
+int test_read_ramdisk_closed(va_list ap);
 
 #endif // _TESTSUITE_RAMDISK_H_
