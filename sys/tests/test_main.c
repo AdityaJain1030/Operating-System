@@ -22,11 +22,20 @@
 
 // include testsuite(s)
 #include "testsuite_1.h"
+#include "testsuite_ramdisk.h"
 
+#ifndef CMNTNAME
 #define CMNTNAME "c"
+#endif
+#ifndef DEVMNTNAME
 #define DEVMNTNAME "dev"
+#endif
+#ifndef CDEVNAME
 #define CDEVNAME "vioblk"
+#endif
+#ifndef CDEVINST
 #define CDEVINST 0
+#endif
 
 #ifndef NUART // number of UARTs
 #define NUART 2
@@ -53,10 +62,11 @@ void main(void) {
 
     enable_interrupts();
 
-    mount_cdrive_ramdisk();
+    run_testsuite_ramdisk();
+    // mount_cdrive_ramdisk();
 
     // Run the testsuite
-    run_testsuite_1();
+    // run_testsuite_1();
 }
 
 void attach_devices(void) {
