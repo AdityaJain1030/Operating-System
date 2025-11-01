@@ -45,7 +45,7 @@ static int ramdisk_cntl(struct storage *sto, int cmd, void *arg);
 // INTERNAL GLOBAL CONSTANTS
 
 static const struct storage_intf ramdisk_intf = {
-    .blksz = 512,
+    .blksz = 1, // KEEP THIS 1
     .open = &ramdisk_open,
     .close = &ramdisk_close,
     .fetch = &ramdisk_fetch,
