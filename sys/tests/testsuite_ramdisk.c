@@ -17,6 +17,7 @@
 #define TEST_BLOB_SIZE 1459
 
 void run_testsuite_ramdisk() {
+    kprintf("---------------------RAMDISK TESTS---------------------\n\n");
     if(test_function("attach_ramdisk", test_attach_ramdisk)) return;
 
     struct storage* rd = find_storage(RAMDISK_NAME, INSTNO);

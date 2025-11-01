@@ -220,9 +220,13 @@ static long vioblk_storage_fetch(struct storage* sto, unsigned long long pos, vo
     virtio_notify_avail(blk->regs, 0);
     
     // wait for response
-    int pie = disable_interrupts();
-    while (blk->avail->idx != blk->used->idx) 
+    // int pie;
+    int pie = disable_interrupts(); // I think highk this line should be inside the while loop
+    while (blk->avail->idx != blk->used->idx)
+    {
+        // pie = disable_interrupts(); // I think highk this line should be inside the while loop
         condition_wait(&blk->ready);
+    }
     restore_interrupts(pie);
 
     lock_release(&blk->lock);
@@ -264,9 +268,13 @@ static long vioblk_storage_store(struct storage* sto, unsigned long long pos, co
     virtio_notify_avail(blk->regs, 0);
     
     // wait for response
-    int pie = disable_interrupts();
-    while (blk->avail->idx != blk->used->idx) 
+    // int pie;
+    int pie = disable_interrupts(); // I think highk this line should be inside the while loop
+    while (blk->avail->idx != blk->used->idx)
+    {
+        // pie = disable_interrupts(); // I think highk this line should be inside the while loop
         condition_wait(&blk->ready);
+    }
     restore_interrupts(pie);
 
     lock_release(&blk->lock);
