@@ -75,7 +75,7 @@ struct vioblk_storage {
 
     // protect these with lock as well
     struct vioblk_header header;
-    uint8_t status; // 5.2.4
+    uint8_t status; // 5.2.5
 
 };
 
@@ -113,13 +113,13 @@ static void vioblk_isr(int irqno, void* aux);
 static void fill_descriptor_table(struct virtq_desc* desc, const struct vioblk_header* header, const void * buf, const unsigned long bytecnt, const uint8_t* status, const int is_read)
 {
     // Fill descriptor 1 (header)
-    desc[0].addr = (uintptr_t)header;
+    desc[0].addr = (uint64_t)header;
     desc[0].len = sizeof(struct vioblk_header);
     desc[0].flags = VIRTQ_DESC_F_NEXT;
     desc[0].next = 1;
 
     // Fill descriptor 2 (data)
-    desc[1].addr = (uintptr_t)buf;
+    desc[1].addr = (uint64_t)buf;
     desc[1].len = bytecnt;
     desc[1].flags = VIRTQ_DESC_F_NEXT;
     if (is_read) {
@@ -129,7 +129,7 @@ static void fill_descriptor_table(struct virtq_desc* desc, const struct vioblk_h
     desc[1].next = 2;
 
     // Fill descriptor 3 (status)
-    desc[2].addr = (uintptr_t)status;
+    desc[2].addr = (uint64_t)status;
     desc[2].len = sizeof(uint8_t); // 5.2.5 only one byte long
     desc[2].flags = VIRTQ_DESC_F_WRITE; // next is not set and write is
 }
