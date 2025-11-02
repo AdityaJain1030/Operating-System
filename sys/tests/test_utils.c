@@ -18,6 +18,20 @@ int test_function(char* test_name, int (*test)(va_list), ...)
     return retval;
 }
 
+// util for printing blocks
+void print_buffer(void* buf, int size)
+{
+    unsigned char* b = (unsigned char*)buf;
+    kprintf("buffer dump (%d bytes):\n", size);
+    for (int i = 0; i < size; i++) {
+        if (i % 16 == 0) 
+            kprintf("\n%02d: ", i / 16); // loc
+        
+        kprintf("%02x ", b[i]); // 1 byte print
+    }
+    kprintf("\n");
+}
+
 // example test to show yall how it works
 int example_test(va_list ap)
 {

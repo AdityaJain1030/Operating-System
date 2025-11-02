@@ -18,4 +18,7 @@
  */
 int test_function(char* test_name, int (*test)(va_list), ...);
 
+
+void print_buffer(void* buf, int size);
+
 #endif /* _TEST_UTILS_H_ */

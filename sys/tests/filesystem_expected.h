@@ -4,7 +4,7 @@
 static const char *abc_short_txt_name = "abc_short.txt";
 static const char *abcs_short_txt_content = "abcdefghijklmnopqrstuvwxyz\n";
 
-static const char *count_long_txt_name = "count_long.txt";
+static const char *count_long_txt_name = "count_long.tx"; // this truncated bc of file length limits
 static const char *count_long_txt_content = "1\n"
                                             "2\n"
                                             "3\n"

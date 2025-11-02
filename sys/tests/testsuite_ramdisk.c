@@ -87,9 +87,10 @@ int test_close_ramdisk(va_list ap)
 int test_ramdisk_read_simple(va_list ap)
 {
     struct storage* rd = va_arg(ap, struct storage*);
-    uint8_t* buf = kmalloc(520);
-    long len = storage_fetch(rd, 0,  buf, 520);
-    kprintf("%d \n", *(buf+2));
+    uint8_t* buf = kmalloc(512);
+    long len = storage_fetch(rd, 4 * 512,  buf, 512);
+    // kprintf("%d \n", *(buf+2));
+    print_buffer(buf, 512);
     kfree(buf);
     if (len < 0) return (int) len;
     return 0;
@@ -100,6 +101,7 @@ int test_ramdisk_read_oob(va_list ap)
     struct storage* rd = va_arg(ap, struct storage*);
     uint8_t* buf = kmalloc(520);
     long len = storage_fetch(rd, 1000,  buf, 520);
+    // print_buffer(buf, 512);
     // kprintf("%d \n", len);
     kfree(buf);
     if (len != TEST_BLOB_SIZE - 1000) return (int) len;

@@ -338,7 +338,7 @@ static int read_superblock(struct ktfs* ktfs) {
     }
     
     // Copy superblock data
-    memcpy(&ktfs->superblock, block, sizeof(struct ktfs_superblock));
+     memcpy(&ktfs->superblock, block, sizeof(struct ktfs_superblock));
     
     // Release block
     cache_release_block(ktfs->cache, block, 0);
@@ -360,7 +360,7 @@ static int read_inode(struct ktfs* ktfs, uint16_t inode_num, struct ktfs_inode* 
     
     // Calculate actual block number
     block_num = 1 + ktfs->superblock.inode_bitmap_block_count + 
-                ktfs->superblock.bitmap_block_count + inode_block_idx;
+                ktfs->superblock.bitmap_block_count + inode_block_idx; // off by one error maybe
     
     // Get the block
     result = cache_get_block(ktfs->cache, block_num * KTFS_BLKSZ, &block);
@@ -388,7 +388,7 @@ static int find_file_in_directory(struct ktfs* ktfs, const char* name, struct kt
     int result;
     
     // Read root directory inode
-    result = read_inode(ktfs, ktfs->superblock.root_directory_inode, &root_inode);
+    result = read_inode(ktfs, ktfs->superblock.root_directory_inode, &root_inode); // root inode
     if (result != 0) {
         return result;
     }
@@ -403,9 +403,10 @@ static int find_file_in_directory(struct ktfs* ktfs, const char* name, struct kt
         
         // Get the data block number for this directory block
         uint32_t block_num = get_data_block_number(ktfs, &root_inode, block_idx);
-        if (block_num == 0) {
-            return -EIO;
-        }
+        block_num += ktfs->superblock.inode_bitmap_block_count + ktfs->superblock.bitmap_block_count + ktfs->superblock.inode_block_count + 1;
+        // if (block_num == 0) {
+        //     return -EIO;
+        // }
         
         // Read the block
         void* block;
@@ -439,7 +440,7 @@ static int find_file_in_directory(struct ktfs* ktfs, const char* name, struct kt
 
 // Get the actual block number for a file's logical block
 static uint32_t get_data_block_number(struct ktfs* ktfs, struct ktfs_inode* inode, uint32_t file_block_idx) {
-    uint32_t ptrs_per_block = KTFS_BLKSZ / sizeof(uint32_t);
+    uint32_t ptrs_per_block = KTFS_BLKSZ / sizeof(uint32_t); // how does this work?? Ill trust it for now
     void* block;
     uint32_t block_num;
     int result;

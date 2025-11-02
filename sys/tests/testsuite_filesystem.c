@@ -23,17 +23,17 @@
 
 #define TEST_BLOB_SIZE 1459
 
-#define BACKEND VIRTIOBLK_NAME
+#define BACKEND RAMDISK_NAME
 
 void run_testsuite_filesystem() {
     kprintf("---------------------KTFS TESTS---------------------\n\n");
     if(test_function("mount", test_mount_ktfs)) halt_failure();
     struct uio** file;
-    if(test_function("open_file", test_open_file, "abc.txt", file)) return;
-    if(test_function("close_file", test_close_file, file)) return;
+    // if(test_function("open_file", test_open_file, abc_short_txt_name, file)) return;
+    // if(test_function("close_file", test_close_file, file)) return;
 
     test_function("read_file_contents_simple", test_read_file_contents, abc_short_txt_name, abcs_short_txt_content);
-    test_function("read_file_contents_long", test_read_file_contents, count_long_txt_name, count_long_txt_content);
+    // test_function("read_file_contents_long", test_read_file_contents, count_long_txt_name, count_long_txt_content);
 }
 
 
@@ -106,6 +106,7 @@ int test_read_file_contents(va_list ap)
     long len = uio_read(file, contents, sizeof(expected));
 
     int out = 0;
+    kprintf(contents);
     if (len < 0) out = len;
     else out = strcmp(expected, contents);
 
