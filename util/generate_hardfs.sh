@@ -1,0 +1,1 @@
+./mkfs_ktfs ../sys/blob.raw 4M 51 ../util/hard_docs/*.txt

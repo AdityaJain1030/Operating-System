@@ -326,8 +326,8 @@ void running_thread_exit(void) {
     {
         TP->state = THREAD_EXITED;
     }
+    release_all_thread_locks(TP); /// forgot to add this LOL
     condition_broadcast(&TP->parent->child_exit);           // broadcast to parent
-
     running_thread_suspend();                               // suspends exiting thread permanently. Should not reach halt_failure() 
 
     halt_failure();

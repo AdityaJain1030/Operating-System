@@ -22,6 +22,8 @@ void run_testsuite_ramdisk() {
 
     struct storage* rd = find_storage(RAMDISK_NAME, INSTNO);
 
+   // easy tests 
+
     if(test_function("open_ramdisk", test_open_ramdisk, rd)) return;
     if(test_function("close_ramdisk", test_close_ramdisk, rd)) return;
 
@@ -40,6 +42,8 @@ void run_testsuite_ramdisk() {
 
     if(test_function("open_after_close_ramdisk", test_open_ramdisk, rd)) return;
     if(test_function("close_ramdisk", test_close_ramdisk, rd)) return;
+
+    
 }
 
 int test_attach_ramdisk(va_list ap)

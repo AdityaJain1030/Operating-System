@@ -2,7 +2,7 @@
 // KTFS filesystem implementation.
 // Copyright (c) 2024-2025 University of Illinois
 //got rid of sync as they are already implemented in cache
-
+#define BLOCK_NUM_ERROR 0xFFFFFFFF
 #include "ktfs.h"
 #include "cache.h"
 #include "console.h"
@@ -410,7 +410,7 @@ static int find_file_in_directory(struct ktfs* ktfs, const char* name, struct kt
     int result;
     
     // Read root directory inode
-    result = read_inode(ktfs, ktfs->superblock.root_directory_inode, &root_inode); // root inode
+    result = read_inode(ktfs, ktfs->superblock.root_directory_inode, &root_inode);
     if (result != 0) {
         return result;
     }
@@ -425,10 +425,13 @@ static int find_file_in_directory(struct ktfs* ktfs, const char* name, struct kt
         
         // Get the data block number for this directory block
         uint32_t block_num = get_data_block_number(ktfs, &root_inode, block_idx);
-        block_num += ktfs->superblock.inode_bitmap_block_count + ktfs->superblock.bitmap_block_count + ktfs->superblock.inode_block_count + 1;
-        // if (block_num == 0) {
-        //     return -EIO;
-        // }
+        
+        // fixed: check for error from get_data_block_number
+        if (block_num == BLOCK_NUM_ERROR) {
+            return -EIO;
+        }
+        
+        // block_num += ktfs->superblock.inode_bitmap_block_count + ktfs->superblock.bitmap_block_count + ktfs->superblock.inode_block_count + 1;
         
         // Read the block
         void* block;
@@ -461,69 +464,80 @@ static int find_file_in_directory(struct ktfs* ktfs, const char* name, struct kt
 }
 
 // Get the actual block number for a file's logical block
+// Returns block number, 0 for sparse blocks, or BLOCK_NUM_ERROR on I/O error
 static uint32_t get_data_block_number(struct ktfs* ktfs, struct ktfs_inode* inode, uint32_t file_block_idx) {
-    uint32_t ptrs_per_block = KTFS_BLKSZ / sizeof(uint32_t); // how does this work?? Ill trust it for now
+    uint32_t ptrs_per_block = KTFS_BLKSZ / sizeof(uint32_t);
     void* block;
     uint32_t block_num;
+    uint32_t offset = 0;
     int result;
+
+    //quick fix
+    // file_block_idx += ktfs->superblock.inode_bitmap_block_count + ktfs->superblock.bitmap_block_count + ktfs->superblock.inode_block_count + 1;
+    offset += ktfs->superblock.inode_bitmap_block_count + ktfs->superblock.bitmap_block_count + ktfs->superblock.inode_block_count + 1;
     
     // Direct blocks
     if (file_block_idx < KTFS_NUM_DIRECT_DATA_BLOCKS) {
-        return inode->block[file_block_idx];
+        return inode->block[file_block_idx] + offset;
     }
     
     file_block_idx -= KTFS_NUM_DIRECT_DATA_BLOCKS;
     
-    // Indirect block
+    // Indirect block (L1)
     if (file_block_idx < ptrs_per_block) {
-        if (inode->indirect == 0) return 0;
+        // if (inode->indirect == 0) return 0; // is this right?
         
-        result = cache_get_block(ktfs->cache, inode->indirect * KTFS_BLKSZ, &block);
+        result = cache_get_block(ktfs->cache, (inode->indirect + offset) * KTFS_BLKSZ, &block); // block is our inode
         
-        if (result != 0) return 0;
+        if (result != 0) return BLOCK_NUM_ERROR; 
         
-        block_num = ((uint32_t*)block)[file_block_idx];
+        block_num = ((uint32_t*)block)[file_block_idx] + offset;
         cache_release_block(ktfs->cache, block, 0);
-        return block_num;
+        return block_num; // Returns a data block number
     }
     
     file_block_idx -= ptrs_per_block;
     
-    // Doubly-indirect blocks (unsure)
+    // Doubly-indirect blocks (L1 and L2)
     for (int i = 0; i < KTFS_NUM_DINDIRECT_BLOCKS; i++) {
         if (file_block_idx < ptrs_per_block * ptrs_per_block) {
-            if (inode->dindirect[i] == 0) return 0;
+            // if (inode->dindirect[i] == 0) return 0; // dont thing this is right
             
             // Read doubly-indirect block
-            result = cache_get_block(ktfs->cache, inode->dindirect[i] * KTFS_BLKSZ, &block);
+            result = cache_get_block(ktfs->cache, (inode->dindirect[i] + offset) * KTFS_BLKSZ, &block); // block is first indirect inode
             
-            if (result != 0) return 0;
+            if (result != 0) return BLOCK_NUM_ERROR; 
             
             uint32_t indirect_idx = file_block_idx / ptrs_per_block;
             uint32_t indirect_block_num = ((uint32_t*)block)[indirect_idx];
             cache_release_block(ktfs->cache, block, 0);
             
-            if (indirect_block_num == 0) return 0;
+            // if (indirect_block_num == 0) return 0;
             
-            // Read indirect block
-            result = cache_get_block(ktfs->cache, indirect_block_num * KTFS_BLKSZ, &block);
+            // fix: again offset to physical.
+            uint32_t physical_indirect_block = indirect_block_num + offset;
+            result = cache_get_block(ktfs->cache, physical_indirect_block * KTFS_BLKSZ, &block);
             
-            if (result != 0) return 0;
+            if (result != 0) return BLOCK_NUM_ERROR; 
             
             uint32_t data_idx = file_block_idx % ptrs_per_block;
-            block_num = ((uint32_t*)block)[data_idx];
+            block_num = ((uint32_t*)block)[data_idx] + offset;
             cache_release_block(ktfs->cache, block, 0);
             return block_num;
         }
         file_block_idx -= ptrs_per_block * ptrs_per_block;
     }
     
-    return 0; // Block index out of range
+    return 0; 
 }
 
-// Read data from a file
 static int read_file_data(struct ktfs* ktfs, struct ktfs_inode* inode, uint32_t offset, void* buf, uint32_t len) {
     uint32_t bytes_read = 0;
+    
+    // absolute block# offset against the start of Data Block 
+    uint32_t data_block_offset = 1 + ktfs->superblock.inode_bitmap_block_count +
+                                     ktfs->superblock.bitmap_block_count +
+                                     ktfs->superblock.inode_block_count;
     
     while (bytes_read < len) {
         uint32_t block_offset = (offset + bytes_read) % KTFS_BLKSZ;
@@ -534,14 +548,20 @@ static int read_file_data(struct ktfs* ktfs, struct ktfs_inode* inode, uint32_t 
             bytes_to_copy = len - bytes_read;
         }
         
-        // Get the data block number
+        // Get the data block number!
         uint32_t block_num = get_data_block_number(ktfs, inode, file_block_idx);
+        
+        if (block_num == BLOCK_NUM_ERROR) {
+            return -EIO;
+        }
+        
         if (block_num == 0) {
             // Sparse file - fill with zeros
             memset((char*)buf + bytes_read, 0, bytes_to_copy);
         } else {
             // Read from the block
             void* block;
+            // block_num =
             int result = cache_get_block(ktfs->cache, block_num * KTFS_BLKSZ, &block);
             
             if (result != 0) {

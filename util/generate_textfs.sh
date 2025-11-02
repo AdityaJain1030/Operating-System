@@ -1,1 +1,1 @@
-./mkfs_ktfs ../sys/blob.raw 2M 16 ../util/docs.txt ../util/abcs.txt ../util/count.txt ../util/count_long.txt ../util/abc_short.txt
+./mkfs_ktfs ../sys/ktfs.raw 2M 16 ../util/docs.txt ../util/abcs.txt ../util/count.txt ../util/count_long.txt ../util/abc_short.txt

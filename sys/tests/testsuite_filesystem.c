@@ -21,19 +21,21 @@
 #include "testsuite_filesystem.h"
 #include "filesystem_expected.h"
 
-#define TEST_BLOB_SIZE 1459
+// #define TEST_BLOB_SIZE 1459
 
-#define BACKEND RAMDISK_NAME
+#define BACKEND VIRTIOBLK_NAME
 
 void run_testsuite_filesystem() {
     kprintf("---------------------KTFS TESTS---------------------\n\n");
     if(test_function("mount", test_mount_ktfs)) halt_failure();
-    struct uio** file;
-    // if(test_function("open_file", test_open_file, abc_short_txt_name, file)) return;
-    // if(test_function("close_file", test_close_file, file)) return;
+    struct uio* file;
+    // if(test_function("open_file", test_open_file, abc_short_txt_name, &file)) return;
+    // if(test_function("close_file", test_close_file, &file)) return;
 
-    test_function("read_file_contents_simple", test_read_file_contents, abc_short_txt_name, abcs_short_txt_content);
-    test_function("read_file_contents_long", test_read_file_contents, count_long_txt_name, count_long_txt_content);
+    // test_function("read_file_contents_simple", test_read_file_contents, abc_short_txt_name, abcs_short_txt_content);
+    // test_function("read_file_contents_long", test_read_file_contents, count_long_txt_name, count_long_txt_content);
+    // test_function("read_file_contents_long", test_read_file_contents, "49.txt", count_long_txt_content);
+    test_function("read_very_large_file", test_load_very_large_file, "1.txt", 512 * 7 * 981);
 }
 
 
@@ -88,9 +90,9 @@ int test_open_file(va_list ap)
 
 int test_close_file(va_list ap)
 {
-    struct uio* file = va_arg(ap, struct uio*);
+    struct uio** file_loc = va_arg(ap, struct uio**);
     // need a better way to test
-    uio_close(file);
+    uio_close(*file_loc);
     return 0;
 }
 
@@ -103,16 +105,62 @@ int test_read_file_contents(va_list ap)
     if (open_file(CMNTNAME, filename, &file) != 0) return -1;
     
     char* contents = kmalloc(strlen(expected));
-    long len = uio_read(file, contents, strlen (expected));
+    long len = uio_read(file, contents, strlen(expected));
 
     int out = 0;
+    contents[len] = '\0';
     if (len < 0) out = len;
     else out = strcmp(expected, contents);
     
-    contents[len] = '\0';
     kprintf(contents);
+    kprintf("\n%d\n", strlen(contents));
     // kprintf(expected);
 
     uio_close(file);
     return out;
+}
+
+int test_load_very_large_file(va_list ap)
+{
+    char* filename = va_arg(ap, char*);
+    int size = va_arg(ap, int);
+    // char* expected = va_arg(ap, char*);
+    struct uio* file;
+
+    if (open_file(CMNTNAME, filename, &file) != 0) return -1;
+    
+    char* contents = kmalloc(512*7);
+    long len;
+    for (int i = 0; i < size / (512 * 7); i++) {
+        len = uio_read(file, contents, 512*7);
+        // kprintf("\n%d", len);
+        if (len == 0)
+        {
+            kprintf("\n%i\n", i);
+            // return len;
+            break;
+        }
+        if (len < 0) {
+            uio_close(file);
+            return len;
+            break;
+        }
+    }
+
+    int out = 0;
+    contents[len] = '\n\0';
+    // if (len < 0) out = len;
+    // else out = strcmp(expected, contents);
+    
+    kprintf(contents);
+    // kprintf("\n%d\n", strlen(contents));
+    // kprintf(expected);
+
+    uio_close(file);
+    return len;
+}
+
+int test_load_several_blocks(va_list ap)
+{
+    return 0;
 }
