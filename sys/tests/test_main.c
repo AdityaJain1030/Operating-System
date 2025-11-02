@@ -23,6 +23,7 @@
 // include testsuite(s)
 #include "testsuite_1.h"
 #include "testsuite_ramdisk.h"
+#include "testsuite_filesystem.h"
 
 #ifndef CMNTNAME
 #define CMNTNAME "c"
@@ -46,8 +47,8 @@
 #endif
 
 static void attach_devices(void);
-static void mount_cdrive(void); // mount primary storage device ("C drive")
-static void mount_cdrive_ramdisk(void); // mount primary storage device ("C drive")
+// static void mount_cdrive(void); // mount primary storage device ("C drive")
+// static void mount_cdrive_ramdisk(void); // mount primary storage device ("C drive")
 
 
 void main(void) {
@@ -63,6 +64,7 @@ void main(void) {
     enable_interrupts();
 
     run_testsuite_ramdisk();
+    run_testsuite_filesystem();
     // mount_cdrive_ramdisk();
 
     // Run the testsuite
