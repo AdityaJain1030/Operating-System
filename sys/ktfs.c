@@ -295,7 +295,7 @@ int ktfs_cntl(struct uio* uio, int cmd, void* arg) {
         lock_release(&ktfs->fs_lock);
         return 0;
     } else if (cmd == FCNTL_MMAP) {
-        kprintf("MMAP is not supported yet\n");
+        // kprintf("MMAP is not supported yet\n");
         lock_release(&ktfs->fs_lock);
         return -ENOTSUP;
     } else {

@@ -384,7 +384,7 @@ void vioblk_attach(volatile struct virtio_mmio_regs* regs, int irqno) {
     result = virtio_negotiate_features(regs, enabled_features, wanted_features, needed_features);
 
     if (result != 0) {
-        kprintf("%p: virtio feature negotiation failed\n", regs);
+        // kprintf("%p: virtio feature negotiation failed\n", regs);
         return;
     }
 
@@ -423,12 +423,12 @@ void vioblk_attach(volatile struct virtio_mmio_regs* regs, int irqno) {
     
     // Check if the queue is not already in use: read QueueReady, and expect a returned value of zero (0x0).
     if (regs->queue_ready != 0) {
-        kprintf("regs->queue_ready is nonzero, queue already in use. initialization failed\n");
+        // kprintf("regs->queue_ready is nonzero, queue already in use. initialization failed\n");
         return;
     }
     // Read maximum queue size (number of elements) from QueueNumMax. If the returned value is zero (0x0) the queue is not available.
     if (regs->queue_num_max == 0) {
-        kprintf("regs->queue_num_max is zero, queue already in use. initialization failed\n");
+        // kprintf("regs->queue_num_max is zero, queue already in use. initialization failed\n");
         return;
     }
     

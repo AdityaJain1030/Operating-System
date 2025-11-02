@@ -7,6 +7,7 @@
 #include "cache.h"
 #include "conf.h"
 #include "console.h"
+#include "dev/ramdisk.h"
 #include "dev/rtc.h"
 #include "dev/uart.h"
 #include "dev/virtio.h"
@@ -20,11 +21,11 @@
 #include "thread.h"
 #include "timer.h"
 
-#define INITEXE "hello"  // FIXME
+#define INITEXE "trek"  // FIXME
 
 #define CMNTNAME "c"
 #define DEVMNTNAME "dev"
-#define CDEVNAME "vioblk"
+#define CDEVNAME "ramdisk"
 #define CDEVINST 0
 
 #ifndef NUART  // number of UARTs
@@ -50,6 +51,7 @@ void main(void) {
     attach_devices();
 
     enable_interrupts();
+    ramdisk_attach();
 
     mount_cdrive();
     run_init();

@@ -65,15 +65,15 @@ void ramdisk_attach() {
     sz = (size_t)(_kimg_blob_end - _kimg_blob_start);
     
     if (sz == 0) {
-        kprintf("ramdisk_attach: No blob data available\n");
+        // kprintf("ramdisk_attach: No blob data available\n");
         return; /* No blob to attach */
     }
 
-    kprintf("ramdisk_attach: Found blob of size %lu bytes\n", (unsigned long)sz);
+    // kprintf("ramdisk_attach: Found blob of size %lu bytes\n", (unsigned long)sz);
 
     rd = kcalloc(1, sizeof(*rd));
     if (rd == NULL) {
-        kprintf("ramdisk_attach: Failed to allocate memory\n");
+        // kprintf("ramdisk_attach: Failed to allocate memory\n");
         return;
     }
 
@@ -85,9 +85,9 @@ void ramdisk_attach() {
 
     if (register_device(RAMDISK_NAME, DEV_STORAGE, rd) != 0) {
         kfree(rd);
-        kprintf("ramdisk_attach: Failed to register device\n");
+        // kprintf("ramdisk_attach: Failed to register device\n");
     } else {
-        kprintf("ramdisk_attach: Successfully registered ramdisk device\n");
+        // kprintf("ramdisk_attach: Successfully registered ramdisk device\n");
     }
 }
 
@@ -205,7 +205,7 @@ static int ramdisk_cntl(struct storage *sto, int cmd, void *arg) {
     }
     
     if (cmd == FCNTL_MMAP) {
-        kprintf("MMAP is not supported yet\n");
+        // kprintf("MMAP is not supported yet\n");
         return -ENOTSUP;
     }
     
