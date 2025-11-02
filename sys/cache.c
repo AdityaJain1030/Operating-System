@@ -69,12 +69,6 @@ static int evict_block(struct cache* cache);
 // NOTE: callers should hold cache->lock for operations that modify metadata.
 #endif
 
-// change cache capacity to 1 for debug cache
-#ifdef DEBUG_CACHE
-#undef CACHE_CAPACITY
-#define CACHE_CAPACITY 1
-#endif
-
 // DEFINITIONS
 /**
  * @brief Creates/initializes a cache with the passed backing storage device (disk) and makes it

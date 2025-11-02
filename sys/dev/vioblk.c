@@ -1,4 +1,4 @@
-/*! @file vioblk.c‌‌‍‍‌‍⁠‌‌​‌‌‌⁠‍‌‌​⁠‍‌‌‌‍​⁠‍‌‌‍⁠​‌‌‍‌​⁠​‍‌‌‌‌‌⁠‍Pillaging-Koala-Pink-Giraffe
+/*! @file vioblk.c‌‌‍‍‌‍⁠‌‌​‌‌‌⁠‍‌‌​⁠‍‌‌‌‍​⁠‍‌‌‍⁠​‌‌‍‌​⁠​‍‌‌‌‌‌⁠‍
     @brief VirtIO block device
     @copyright Copyright (c) 2024-2025 University of Illinois
 
@@ -48,6 +48,8 @@
 
 // VirtIO block request status
 #define VIRTIO_BLK_S_OK 0
+#define VIRTIO_BLK_S_IOERR 1
+#define VIRTIO_BLK_S_UNSUPP 2
 
 //VIOBLK device structure
 
@@ -68,7 +70,7 @@ struct vioblk_storage {
     struct virtq_desc* desc;                 // assume size one
     struct virtq_avail* avail;               // available ring
     struct virtq_used* used;                 // used ring
-    unsigned int virtqueue_size;             // always 3
+    unsigned int virtqueue_size;             // always 4, must be a power of 2 by 2.7
 
     struct condition ready;                  //< signalled when ready
     struct lock lock;
@@ -229,6 +231,9 @@ static long vioblk_storage_fetch(struct storage* sto, unsigned long long pos, vo
     }
     restore_interrupts(pie);
 
+    if (blk->status == VIRTIO_BLK_S_IOERR) bytecnt = -EIO; // 5.2.6
+    if (blk->status == VIRTIO_BLK_S_UNSUPP) bytecnt = -ENOTSUP; // 5.2.6
+
     lock_release(&blk->lock);
     return bytecnt;
 }
@@ -276,6 +281,9 @@ static long vioblk_storage_store(struct storage* sto, unsigned long long pos, co
         condition_wait(&blk->ready);
     }
     restore_interrupts(pie);
+
+    if (blk->status == VIRTIO_BLK_S_IOERR) bytecnt = -EIO; // 5.2.6
+    if (blk->status == VIRTIO_BLK_S_UNSUPP) bytecnt = -ENOTSUP; // 5.2.6
 
     lock_release(&blk->lock);
     return bytecnt;
@@ -375,7 +383,8 @@ void vioblk_attach(volatile struct virtio_mmio_regs* regs, int irqno) {
     blk->opened = 0;
     condition_init(&blk->ready, "vioblk.ready");
     lock_init(&blk->lock);
-    blk->virtqueue_size = 3;
+    //Queue Size corresponds to the maximum number of buffers in the virtqueue4. Queue Size value is always a power of 2. The maximum Queue Size value is 32768. This value is specified in a bus-specific way. 
+    blk->virtqueue_size = 4; // 2.7
     
     // Select the queue writing its index (first queue is 0) to QueueSel.
     regs->queue_sel = 0;

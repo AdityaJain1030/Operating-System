@@ -102,7 +102,7 @@ int test_read_file_contents(va_list ap)
 
     if (!open_file(CMNTNAME, filename, &file)) return -1;
     
-    char* contents;
+    char* contents = kmalloc(sizeof(expected));
     long len = uio_read(file, contents, sizeof(expected));
 
     int out = 0;
