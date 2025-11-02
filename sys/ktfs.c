@@ -2,7 +2,7 @@
 // KTFS filesystem implementation.
 // Copyright (c) 2024-2025 University of Illinois
 //got rid of sync as they are already implemented in cache
-
+#define BLOCK_NUM_ERROR 0xFFFFFFFF
 #include "ktfs.h"
 #include "cache.h"
 #include "console.h"
@@ -388,7 +388,7 @@ static int find_file_in_directory(struct ktfs* ktfs, const char* name, struct kt
     int result;
     
     // Read root directory inode
-    result = read_inode(ktfs, ktfs->superblock.root_directory_inode, &root_inode); // root inode
+    result = read_inode(ktfs, ktfs->superblock.root_directory_inode, &root_inode);
     if (result != 0) {
         return result;
     }
@@ -403,10 +403,13 @@ static int find_file_in_directory(struct ktfs* ktfs, const char* name, struct kt
         
         // Get the data block number for this directory block
         uint32_t block_num = get_data_block_number(ktfs, &root_inode, block_idx);
+        
+        // fixed: check for error from get_data_block_number
+        if (block_num == BLOCK_NUM_ERROR) {
+            return -EIO;
+        }
+        
         block_num += ktfs->superblock.inode_bitmap_block_count + ktfs->superblock.bitmap_block_count + ktfs->superblock.inode_block_count + 1;
-        // if (block_num == 0) {
-        //     return -EIO;
-        // }
         
         // Read the block
         void* block;
@@ -439,8 +442,11 @@ static int find_file_in_directory(struct ktfs* ktfs, const char* name, struct kt
 }
 
 // Get the actual block number for a file's logical block
+// Returns block number, 0 for sparse blocks, or BLOCK_NUM_ERROR on I/O error
+
+
 static uint32_t get_data_block_number(struct ktfs* ktfs, struct ktfs_inode* inode, uint32_t file_block_idx) {
-    uint32_t ptrs_per_block = KTFS_BLKSZ / sizeof(uint32_t); // how does this work?? Ill trust it for now
+    uint32_t ptrs_per_block = KTFS_BLKSZ / sizeof(uint32_t);
     void* block;
     uint32_t block_num;
     int result;
@@ -458,7 +464,7 @@ static uint32_t get_data_block_number(struct ktfs* ktfs, struct ktfs_inode* inod
         
         result = cache_get_block(ktfs->cache, inode->indirect * KTFS_BLKSZ, &block);
         
-        if (result != 0) return 0;
+        if (result != 0) return BLOCK_NUM_ERROR;  // fixed: return error sentinel
         
         block_num = ((uint32_t*)block)[file_block_idx];
         cache_release_block(ktfs->cache, block, 0);
@@ -467,7 +473,7 @@ static uint32_t get_data_block_number(struct ktfs* ktfs, struct ktfs_inode* inod
     
     file_block_idx -= ptrs_per_block;
     
-    // Doubly-indirect blocks (unsure)
+    // Doubly-indirect blocks
     for (int i = 0; i < KTFS_NUM_DINDIRECT_BLOCKS; i++) {
         if (file_block_idx < ptrs_per_block * ptrs_per_block) {
             if (inode->dindirect[i] == 0) return 0;
@@ -475,7 +481,7 @@ static uint32_t get_data_block_number(struct ktfs* ktfs, struct ktfs_inode* inod
             // Read doubly-indirect block
             result = cache_get_block(ktfs->cache, inode->dindirect[i] * KTFS_BLKSZ, &block);
             
-            if (result != 0) return 0;
+            if (result != 0) return BLOCK_NUM_ERROR;  // fixed: return error sentinel
             
             uint32_t indirect_idx = file_block_idx / ptrs_per_block;
             uint32_t indirect_block_num = ((uint32_t*)block)[indirect_idx];
@@ -486,7 +492,7 @@ static uint32_t get_data_block_number(struct ktfs* ktfs, struct ktfs_inode* inod
             // Read indirect block
             result = cache_get_block(ktfs->cache, indirect_block_num * KTFS_BLKSZ, &block);
             
-            if (result != 0) return 0;
+            if (result != 0) return BLOCK_NUM_ERROR;  // fixed: return error sentinel
             
             uint32_t data_idx = file_block_idx % ptrs_per_block;
             block_num = ((uint32_t*)block)[data_idx];
@@ -514,6 +520,12 @@ static int read_file_data(struct ktfs* ktfs, struct ktfs_inode* inode, uint32_t 
         
         // Get the data block number
         uint32_t block_num = get_data_block_number(ktfs, inode, file_block_idx);
+        
+        // fixed: check for error from get_data_block_number
+        if (block_num == BLOCK_NUM_ERROR) {
+            return -EIO;
+        }
+        
         if (block_num == 0) {
             // Sparse file - fill with zeros
             memset((char*)buf + bytes_read, 0, bytes_to_copy);
