@@ -11,6 +11,7 @@
 #include "dev/uart.h"
 #include "dev/virtio.h"
 #include "device.h"
+#include "elf.h"
 #include "error.h"
 #include "filesys.h"
 #include "heap.h"
@@ -19,7 +20,7 @@
 #include "thread.h"
 #include "timer.h"
 
-#define INITEXE ""  // FIXME
+#define INITEXE "hello"  // FIXME
 
 #define CMNTNAME "c"
 #define DEVMNTNAME "dev"
@@ -109,6 +110,7 @@ void mount_cdrive(void) {
 
 void run_init(void) {
     struct uio* initexe;
+    struct uio* uart_dev;
     int result;
 
     result = open_file(CMNTNAME, INITEXE, &initexe);
@@ -118,7 +120,19 @@ void run_init(void) {
         halt_failure();
     }
 
+    result = open_file(DEVMNTNAME, "uart1", &uart_dev);
+    
+    if (result != 0) {
+        kprintf(INITEXE ": %s; terminating\n", error_name(result));
+        halt_failure();
+    }
     // FIXME
     //  Run your executable here
     //  Note that trek takes in a uio object to output to the console
+    // void (*start_trek)(struct uio*);
+    void (*start_adele)(struct uio*);
+
+    elf_load(initexe, &start_adele);
+
+    start_adele(uart_dev);
 }

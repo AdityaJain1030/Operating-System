@@ -465,7 +465,7 @@ static uint32_t get_data_block_number(struct ktfs* ktfs, struct ktfs_inode* inod
     if (file_block_idx < ptrs_per_block) {
         // if (inode->indirect == 0) return 0; // is this right?
         
-        result = cache_get_block(ktfs->cache, inode->indirect * KTFS_BLKSZ, &block); // block is our inode
+        result = cache_get_block(ktfs->cache, (inode->indirect + offset) * KTFS_BLKSZ, &block); // block is our inode
         
         if (result != 0) return BLOCK_NUM_ERROR; 
         
@@ -482,7 +482,7 @@ static uint32_t get_data_block_number(struct ktfs* ktfs, struct ktfs_inode* inod
             // if (inode->dindirect[i] == 0) return 0; // dont thing this is right
             
             // Read doubly-indirect block
-            result = cache_get_block(ktfs->cache, inode->dindirect[i] * KTFS_BLKSZ, &block); // block is first indirect inode
+            result = cache_get_block(ktfs->cache, (inode->dindirect[i] + offset) * KTFS_BLKSZ, &block); // block is first indirect inode
             
             if (result != 0) return BLOCK_NUM_ERROR; 
             
@@ -490,17 +490,17 @@ static uint32_t get_data_block_number(struct ktfs* ktfs, struct ktfs_inode* inod
             uint32_t indirect_block_num = ((uint32_t*)block)[indirect_idx];
             cache_release_block(ktfs->cache, block, 0);
             
-            if (indirect_block_num == 0) return 0;
+            // if (indirect_block_num == 0) return 0;
             
             // fix: again offset to physical.
-            uint32_t physical_indirect_block = indirect_block_num;
+            uint32_t physical_indirect_block = indirect_block_num + offset;
             result = cache_get_block(ktfs->cache, physical_indirect_block * KTFS_BLKSZ, &block);
             
             if (result != 0) return BLOCK_NUM_ERROR; 
             
             uint32_t data_idx = file_block_idx % ptrs_per_block;
             block_num = ((uint32_t*)block)[data_idx] + offset;
-            cache_release_block(ktfs->cache, block + offset, 0);
+            cache_release_block(ktfs->cache, block, 0);
             return block_num;
         }
         file_block_idx -= ptrs_per_block * ptrs_per_block;
