@@ -33,7 +33,7 @@ void run_testsuite_filesystem() {
     // if(test_function("close_file", test_close_file, file)) return;
 
     test_function("read_file_contents_simple", test_read_file_contents, abc_short_txt_name, abcs_short_txt_content);
-    // test_function("read_file_contents_long", test_read_file_contents, count_long_txt_name, count_long_txt_content);
+    test_function("read_file_contents_long", test_read_file_contents, count_long_txt_name, count_long_txt_content);
 }
 
 
@@ -100,15 +100,18 @@ int test_read_file_contents(va_list ap)
     char* expected = va_arg(ap, char*);
     struct uio* file;
 
-    if (!open_file(CMNTNAME, filename, &file)) return -1;
+    if (open_file(CMNTNAME, filename, &file) != 0) return -1;
     
-    char* contents = kmalloc(sizeof(expected));
-    long len = uio_read(file, contents, sizeof(expected));
+    char* contents = kmalloc(strlen(expected));
+    long len = uio_read(file, contents, strlen (expected));
 
     int out = 0;
-    kprintf(contents);
     if (len < 0) out = len;
     else out = strcmp(expected, contents);
+    
+    contents[len] = '\0';
+    kprintf(contents);
+    // kprintf(expected);
 
     uio_close(file);
     return out;

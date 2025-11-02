@@ -15,6 +15,8 @@
  * @param test_name: name to print
  * @param test: function to test, by convention function returns 0 on success, non-zero on failure
  * @param ...: forwarded to test via va_list
+ * see https://stackoverflow.com/questions/3530771/passing-variable-arguments-to-another-function-that-accepts-a-variable-argument
+ * for how passing in variable arguements works (talked to CA abt bugs in this)
  */
 int test_function(char* test_name, int (*test)(va_list), ...);
 
