@@ -203,9 +203,9 @@ int cache_get_block(struct cache* cache, unsigned long long pos, void** pptr) {
             // block exists in cache (either valid or being loaded)
             if (block->loading) {
                 // another thread is loading this block, wait for it
-                lock_release(&cache->lock);  // fixed: release lock before wait
+                //removed all thread locking to avoid race cond.
                 condition_wait(&cache->cond);
-                lock_acquire(&cache->lock);  // fixed: reacquire lock after wake
+                
                 continue;
             }
             
@@ -229,9 +229,9 @@ int cache_get_block(struct cache* cache, unsigned long long pos, void** pptr) {
             if (er != 0) {
                 // fixed: wait and retry on EBUSY instead of failing immediately
                 if (er == -EBUSY) {
-                    lock_release(&cache->lock);
+                    
                     condition_wait(&cache->cond);
-                    lock_acquire(&cache->lock);
+                    
                     continue;
                 }
                 // for other errors, return immediately
@@ -241,9 +241,9 @@ int cache_get_block(struct cache* cache, unsigned long long pos, void** pptr) {
             freeb = get_free_block(cache);
             if (freeb == NULL) {
                 // fixed: still no free block after eviction, wait and retry
-                lock_release(&cache->lock);
+                
                 condition_wait(&cache->cond);
-                lock_acquire(&cache->lock);
+                
                 continue;
             }
         }
@@ -378,9 +378,9 @@ int cache_flush(struct cache* cache) {
 
         // wait for block to have no users
         while (block->refcnt > 0) {
-            lock_release(&cache->lock);  // fixed: release lock before wait
+            
             condition_wait(&cache->cond);
-            lock_acquire(&cache->lock);  // fixed: reacquire lock after wake
+            
         }
 
         // mark as being written back
