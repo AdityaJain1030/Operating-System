@@ -85,20 +85,20 @@ int create_cache(struct storage* disk, struct cache** cptr) {
         return -EINVAL;
     }
     
-    // Allocate cache structure
+    // allocate cache structure
     cache = kmalloc(sizeof(struct cache));
     if (cache == NULL) {
         return -ENOMEM;
     }
     
-    // Allocate cache blocks array
+    // allocate cache blocks array
     cache->blocks = kmalloc(CACHE_CAPACITY * sizeof(struct cache_block));
     if (cache->blocks == NULL) {
         kfree(cache);
         return -ENOMEM;
     }
     
-    // Initialize cache
+    // initialize cache
     cache->disk = disk;
     cache->capacity = CACHE_CAPACITY;
     cache->used = 0;
@@ -107,7 +107,7 @@ int create_cache(struct storage* disk, struct cache** cptr) {
     lock_init(&cache->lock);
     condition_init(&cache->cond, "cache_cond");
     
-    // Initialize all blocks
+    // initialize all blocks
     for (i = 0; i < CACHE_CAPACITY; i++) {
         cache->blocks[i].pos = 0;
         cache->blocks[i].data = NULL;
@@ -142,7 +142,7 @@ int cache_get_block(struct cache* cache, unsigned long long pos, void** pptr) {
 
     void* buffer = kmalloc(CACHE_BLKSZ);
     *pptr = buffer;
-    long len = storage_fetch(cache->disk, pos, buffer, CACHE_BLKSZ); // calls wait
+    long len = storage_fetch(cache->disk, pos, buffer, CACHE_BLKSZ);
     if (len < 0) return (int)len;
 
     return 0;
@@ -200,15 +200,17 @@ int cache_get_block(struct cache* cache, unsigned long long pos, void** pptr) {
         block = find_block(cache, pos);
         
         if (block != NULL) {
-            /* Block exists in cache (either valid or being loaded) */
+            // block exists in cache (either valid or being loaded)
             if (block->loading) {
-                /* Another thread is loading this block - wait for completion */
+                // another thread is loading this block, wait for it
+                lock_release(&cache->lock);  // fixed: release lock before wait
                 condition_wait(&cache->cond);
-                continue; /* Re-check from beginning after waking */
+                lock_acquire(&cache->lock);  // fixed: reacquire lock after wake
+                continue;
             }
             
             if (block->valid) {
-                /* Block is valid and ready to use */
+                // block is ready to use
                 block->refcnt++;
                 lru_remove(cache, block);
                 lru_add_head(cache, block);
@@ -216,37 +218,47 @@ int cache_get_block(struct cache* cache, unsigned long long pos, void** pptr) {
                 lock_release(&cache->lock);
                 return 0;
             }
-            /* If we get here, block exists but is neither loading nor valid - shouldn't happen */
-            /* Fall through to allocate new block */
+            // fall through if block exists but isn't valid or loading
         }
 
-        /* Block not in cache - need to allocate and load it */
+        // block not in cache, need to load it
         freeb = get_free_block(cache);
         if (freeb == NULL) {
-            /* No free blocks - try to evict */
+            // no free blocks, try eviction
             int er = evict_block(cache);
             if (er != 0) {
+                // fixed: wait and retry on EBUSY instead of failing immediately
+                if (er == -EBUSY) {
+                    lock_release(&cache->lock);
+                    condition_wait(&cache->cond);
+                    lock_acquire(&cache->lock);
+                    continue;
+                }
+                // for other errors, return immediately
                 lock_release(&cache->lock);
                 return er;
             }
             freeb = get_free_block(cache);
             if (freeb == NULL) {
+                // fixed: still no free block after eviction, wait and retry
                 lock_release(&cache->lock);
-                return -ENOMEM;
+                condition_wait(&cache->cond);
+                lock_acquire(&cache->lock);
+                continue;
             }
         }
 
-        /* Mark block as being loaded */
+        // mark block as being loaded
         freeb->loading = 1;
         freeb->pos = pos;
         freeb->valid = 0;
         freeb->dirty = 0;
-        freeb->refcnt = 1; /* Caller will hold one reference */
+        freeb->refcnt = 1;
         
-        /* Release lock while performing I/O */
+        // release lock while doing I/O
         lock_release(&cache->lock);
 
-        /* Allocate buffer for data */
+        // allocate buffer for data
         buf = kmalloc(CACHE_BLKSZ);
         if (buf == NULL) {
             lock_acquire(&cache->lock);
@@ -257,7 +269,7 @@ int cache_get_block(struct cache* cache, unsigned long long pos, void** pptr) {
             return -ENOMEM;
         }
 
-        /* Fetch data from backing storage */
+        // fetch data from backing storage
         result = storage_fetch(cache->disk, pos, buf, CACHE_BLKSZ);
         if (result != CACHE_BLKSZ) {
             kfree(buf);
@@ -269,10 +281,10 @@ int cache_get_block(struct cache* cache, unsigned long long pos, void** pptr) {
             return -EIO;
         }
 
-        /* Re-acquire lock and finalize block */
+        // reacquire lock and finalize block
         lock_acquire(&cache->lock);
         
-        /* Check if block is still ours (paranoid check) */
+        // verify block is still ours
         if (freeb->loading && freeb->pos == pos) {
             freeb->data = buf;
             freeb->valid = 1;
@@ -284,7 +296,7 @@ int cache_get_block(struct cache* cache, unsigned long long pos, void** pptr) {
             lock_release(&cache->lock);
             return 0;
         } else {
-            /* Something went wrong - clean up */
+            // something went wrong, clean up
             kfree(buf);
             lock_release(&cache->lock);
             return -EIO;
@@ -308,7 +320,7 @@ void cache_release_block(struct cache* cache, void* pblk, int dirty) {
 
     lock_acquire(&cache->lock);
 
-    /* Find the block containing this data pointer */
+    // find the block with this data pointer
     for (i = 0; i < CACHE_CAPACITY; i++) {
         if (cache->blocks[i].valid && 
             cache->blocks[i].data == pblk) {
@@ -318,28 +330,23 @@ void cache_release_block(struct cache* cache, void* pblk, int dirty) {
     }
 
     if (block == NULL) {
-        /* Block not found - this shouldn't happen but handle gracefully */
+        // block not found, shouldn't happen but handle gracefully
         lock_release(&cache->lock);
         return;
     }
 
-    /* Mark dirty if requested (only set, never clear) */
+    // mark dirty if requested
     if (dirty) {
         block->dirty = 1;
     }
 
-    /* Decrement reference count */
+    // decrement reference count
     if (block->refcnt > 0) {
         block->refcnt--;
-        
-        /* Only move in LRU if refcnt reaches 0 (no longer in active use) */
-        if (block->refcnt == 0) {
-            lru_remove(cache, block);
-            lru_add_head(cache, block);
-        }
     }
+    // fixed: removed LRU update on release (already updated on access)
 
-    /* Wake any threads waiting for blocks to become available */
+    // wake any threads waiting for blocks
     condition_broadcast(&cache->cond);
 
     lock_release(&cache->lock);
@@ -358,37 +365,39 @@ int cache_flush(struct cache* cache) {
 
     if (cache == NULL) return -EINVAL;
 
-    /* Flush all dirty blocks */
+    // flush all dirty blocks
     for (i = 0; i < CACHE_CAPACITY; i++) {
         lock_acquire(&cache->lock);
         block = &cache->blocks[i];
 
-        /* Skip if not dirty or not valid */
+        // skip if not dirty or not valid
         if (!block->valid || !block->dirty || block->loading) {
             lock_release(&cache->lock);
             continue;
         }
 
-        /* Wait for block to have no users */
+        // wait for block to have no users
         while (block->refcnt > 0) {
+            lock_release(&cache->lock);  // fixed: release lock before wait
             condition_wait(&cache->cond);
+            lock_acquire(&cache->lock);  // fixed: reacquire lock after wake
         }
 
-        /* Mark as being written back */
+        // mark as being written back
         block->loading = 1;
         void* data_copy = block->data;
         unsigned long long pos_copy = block->pos;
         lock_release(&cache->lock);
 
-        /* Perform write without holding lock */
+        // perform write without holding lock
         result = storage_store(cache->disk, pos_copy, data_copy, CACHE_BLKSZ);
         
         lock_acquire(&cache->lock);
         if (result == CACHE_BLKSZ) {
-            /* Success - clear dirty flag */
+            // success, clear dirty flag
             block->dirty = 0;
         } else {
-            /* Failed - record error but continue flushing other blocks */
+            // failed, record error but continue flushing other blocks
             error = -EIO;
         }
         block->loading = 0;
@@ -410,17 +419,17 @@ int cache_flush(struct cache* cache) {
 static void lru_remove(struct cache* cache, struct cache_block* block) {
     if (block == NULL) return;
     
-    // Update head if removing head
+    // update head if removing head
     if (cache->lru_head == block) {
         cache->lru_head = block->next;
     }
     
-    // Update tail if removing tail
+    // update tail if removing tail
     if (cache->lru_tail == block) {
         cache->lru_tail = block->prev;
     }
     
-    // Update neighbors
+    // update neighbors
     if (block->prev != NULL) {
         block->prev->next = block->next;
     }
@@ -428,7 +437,7 @@ static void lru_remove(struct cache* cache, struct cache_block* block) {
         block->next->prev = block->prev;
     }
     
-    // Clear block's links
+    // clear block's links
     block->next = NULL;
     block->prev = NULL;
 }
@@ -441,18 +450,18 @@ static void lru_remove(struct cache* cache, struct cache_block* block) {
 static void lru_add_head(struct cache* cache, struct cache_block* block) {
     if (block == NULL) return;
     
-    // Clear block's links first
+    // clear block's links first
     block->next = NULL;
     block->prev = NULL;
     
-    // If list is empty
+    // if list is empty
     if (cache->lru_head == NULL) {
         cache->lru_head = block;
         cache->lru_tail = block;
         return;
     }
     
-    // Add to head
+    // add to head
     block->next = cache->lru_head;
     cache->lru_head->prev = block;
     cache->lru_head = block;
@@ -468,7 +477,7 @@ static struct cache_block* find_block(struct cache* cache, unsigned long long po
     int i;
     
     for (i = 0; i < CACHE_CAPACITY; i++) {
-        /* Match blocks that are either valid or currently being loaded for this pos */
+        // match blocks that are either valid or currently being loaded
         if ((cache->blocks[i].valid || cache->blocks[i].loading) && cache->blocks[i].pos == pos) {
             return &cache->blocks[i];
         }
@@ -486,7 +495,7 @@ static struct cache_block* get_free_block(struct cache* cache) {
     int i;
     
     for (i = 0; i < CACHE_CAPACITY; i++) {
-        /* free if not valid and not currently being used/loaded */
+        // free if not valid and not being used or loaded
         if (!cache->blocks[i].valid && !cache->blocks[i].loading && cache->blocks[i].refcnt == 0) {
             return &cache->blocks[i];
         }
@@ -508,7 +517,7 @@ static int evict_block(struct cache* cache) {
     int need_writeback = 0;
     long result;
 
-    /* Scan from tail (LRU) to find an evictable block */
+    // scan from tail (LRU) to find an evictable block
     current = cache->lru_tail;
     while (current != NULL) {
         if (current->valid && 
@@ -521,21 +530,21 @@ static int evict_block(struct cache* cache) {
     }
 
     if (victim == NULL) {
-        return -EBUSY; /* No evictable blocks */
+        return -EBUSY;
     }
 
-    /* Remove from LRU and prepare for eviction */
+    // remove from LRU and prepare for eviction
     lru_remove(cache, victim);
-    victim->loading = 1; /* Prevent others from using it */
+    victim->loading = 1;
 
-    /* Check if writeback needed */
+    // check if writeback needed
     if (victim->dirty) {
         need_writeback = 1;
         data_to_write = victim->data;
         pos_to_write = victim->pos;
     }
 
-    /* Clear the block (still holding lock) */
+    // clear the block
     void* old_data = victim->data;
     victim->data = NULL;
     victim->valid = 0;
@@ -543,33 +552,31 @@ static int evict_block(struct cache* cache) {
     victim->pos = 0;
     cache->used--;
 
-    /* Release lock for I/O */
+    // release lock for I/O
     lock_release(&cache->lock);
 
-    /* Perform writeback if needed */
+    // perform writeback if needed
     if (need_writeback) {
         result = storage_store(cache->disk, pos_to_write, data_to_write, CACHE_BLKSZ);
         if (result != CACHE_BLKSZ) {
-            /* Writeback failed - free memory and return error */
+            // writeback failed, free memory and return error
             kfree(old_data);
             lock_acquire(&cache->lock);
             victim->loading = 0;
             condition_broadcast(&cache->cond);
-            /* Note: lock remains held for caller */
             return -EIO;
         }
     }
 
-    /* Free the old buffer */
+    // free the old buffer
     if (old_data != NULL) {
         kfree(old_data);
     }
 
-    /* Re-acquire lock and finish */
+    // reacquire lock and finish
     lock_acquire(&cache->lock);
     victim->loading = 0;
     condition_broadcast(&cache->cond);
-    /* Lock remains held for caller */
     return 0;
 }
 #endif
