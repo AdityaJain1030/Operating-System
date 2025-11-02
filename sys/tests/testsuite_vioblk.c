@@ -14,34 +14,20 @@
 
 #include "testsuite_vioblk.h"
 
-#define TEST_BLOB_SIZE 1459
+#define TEST_BLOB_SIZE 512
 
 void run_testsuite_vioblk() {
     kprintf("---------------------VIOBLK TESTS---------------------\n\n");
-    struct storage* rd = find_storage(VIRTIOBLK_NAME, INSTNO);
+    struct storage* blk = find_storage(VIRTIOBLK_NAME, INSTNO);
 
-   // open/close
+    // simple open tests
+    if(test_function("open_close_vioblk", test_open_close, blk)) return;
+    if(test_function("double_open_vioblk", test_double_open, blk)) return;
 
-    // if(test_function("open_ramdisk", test_open_ramdisk, rd)) return;
-    // if(test_function("close_ramdisk", test_close_ramdisk, rd)) return;
-
-    // if(test_function("open_after_close_ramdisk", test_open_ramdisk, rd)) return;
-
-    // test_function("read_simple_ramdisk", test_ramdisk_read_simple, rd);  
-    // test_function("read_oob_ramdisk", test_ramdisk_read_oob, rd);
-    // test_function("read_oob_ramdisk2", test_ramdisk_read_oob2, rd);
-
-    // test_function("cntl_ramdisk", test_cntl_ramdisk, rd);
-    
-    // if(test_function("close_ramdisk", test_close_ramdisk, rd)) return;
-    
-    // test_function("cntl_ramdisk_closed", test_cntl_ramdisk_closed, rd);
-    // test_function("read_ramdisk_closed", test_read_ramdisk_closed, rd);
-
-    // if(test_function("open_after_close_ramdisk", test_open_ramdisk, rd)) return;
-    // if(test_function("close_ramdisk", test_close_ramdisk, rd)) return;
-
-    
+    // read tests
+    test_function("read_vioblk_within_bounds", test_read, blk, 0, TEST_BLOB_SIZE, (unsigned int)-1, NULL);
+    test_function("read_vioblk_oob_pos", test_read, blk, (unsigned long long)-1, 20, -1, NULL);
+    test_function("read_vioblk_unaligned_size", test_read, blk, 0, TEST_BLOB_SIZE + 1, 512, NULL);
 }
 
 int test_open_close(va_list ap)
@@ -97,8 +83,24 @@ int test_read(va_list ap)
 
     storage_open(blk);
     char* buf = kmalloc(bufsz);
-    int result = storage_fetch(blk, pos, blk, bufsz);
+    int result = storage_fetch(blk, pos, buf, bufsz);
 
-    if (expected_size < 0) return (result >= 0);
+    if (expected_size == (unsigned int)-1) return (result < 0);
+
+    if (result != expected_size) {
+        kprintf("read size mismatch: expected %d, got %d\n", expected_size, result);
+        kfree(buf);
+        storage_close(blk);
+        return result;
+    }
+
+    if (expected_data == NULL) return 0;
+
+    if (strcmp(buf, expected_data) != 0) {
+        kprintf("read data mismatch\n");
+        kfree(buf);
+        storage_close(blk);
+        return strcmp(buf, expected_data);
+    }
 
 }

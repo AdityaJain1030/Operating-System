@@ -21,6 +21,11 @@
 int test_function(char* test_name, int (*test)(va_list), ...);
 
 
+// TODO (didnt get around to for this cp):
+// Helper function for fuzzing a function
+// A helper that automatically tests for OOB and nullptr handling
+// A quick way to run threads on a test function
+
 void print_buffer(void* buf, int size);
 
 #endif /* _TEST_UTILS_H_ */
