@@ -493,7 +493,7 @@ static uint32_t get_data_block_number(struct ktfs* ktfs, struct ktfs_inode* inod
             if (indirect_block_num == 0) return 0;
             
             // fix: again offset to physical.
-            uint32_t physical_indirect_block = indirect_block_num + data_block_offset;
+            uint32_t physical_indirect_block = indirect_block_num;
             result = cache_get_block(ktfs->cache, physical_indirect_block * KTFS_BLKSZ, &block);
             
             if (result != 0) return BLOCK_NUM_ERROR; 
