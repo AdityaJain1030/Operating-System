@@ -295,7 +295,7 @@ int ktfs_cntl(struct uio* uio, int cmd, void* arg) {
         lock_release(&ktfs->fs_lock);
         return 0;
     } else if (cmd == FCNTL_MMAP) {
-        kprintf("MMAP is not supported yet\n");
+        // kprintf("MMAP is not supported yet\n");
         lock_release(&ktfs->fs_lock);
         return -ENOTSUP;
     } else {
@@ -513,9 +513,7 @@ static int read_file_data(struct ktfs* ktfs, struct ktfs_inode* inode, uint32_t 
     uint32_t bytes_read = 0;
     
     // absolute block# offset against the start of Data Block 
-    uint32_t data_block_offset = 1 + ktfs->superblock.inode_bitmap_block_count +
-                                     ktfs->superblock.bitmap_block_count +
-                                     ktfs->superblock.inode_block_count;
+    //uint32_t data_block_offset = 1 + ktfs->superblock.inode_bitmap_block_count + ktfs->superblock.bitmap_block_count + ktfs->superblock.inode_block_count;
     
     while (bytes_read < len) {
         uint32_t block_offset = (offset + bytes_read) % KTFS_BLKSZ;

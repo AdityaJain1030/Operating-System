@@ -99,6 +99,8 @@ struct uart_serial {
 
     struct ringbuf rxbuf;
     struct ringbuf txbuf;
+
+    struct lock lock;
 };
 
 // INTERNAL FUNCTION DEFINITIONS
@@ -160,7 +162,7 @@ void attach_uart(void * mmio_base, int irqno) {
 
     condition_init(&uart->rxbnotempty, "uart.rxnotempty");
     condition_init(&uart->txbnotfull, "uart.txnotfull");
-
+    lock_init(&uart->lock);
 
     // Initialize hardware
 
@@ -198,9 +200,12 @@ int uart_serial_open(struct serial * ser) {
 
     trace("%s()", __func__);
 
-    if (uart->opened)
+    lock_acquire(&uart->lock);
+    if (uart->opened) {
+        lock_release(&uart->lock);
         return -EBUSY;
-    
+    }
+
     // Reset receive and transmit buffers
     
     rbuf_init(&uart->rxbuf);
@@ -216,6 +221,7 @@ int uart_serial_open(struct serial * ser) {
     enable_intr_source(uart->irqno, UART_INTR_PRIO, uart_isr, uart);    // enable interrupt source
     uart->regs->ier |= IER_DRIE; // enable DR interrupt
 
+    lock_release(&uart->lock);
     return 0;
 }
 /* void uart_serial_close(struct serial *ser)
@@ -236,12 +242,15 @@ void uart_serial_close(struct serial * ser) {
         (void*)ser - offsetof(struct uart_serial, base);
 
     trace("%s()", __func__);
-
-    if (!uart->opened)
+    lock_acquire(&uart->lock);
+    if (!uart->opened) {
+        lock_release(&uart->lock);
         return;
+    }
     disable_intr_source(uart->irqno);
     uart->regs->ier = 0;     // disable all interrupts
     uart->opened = 0;
+    lock_release(&uart->lock);
 }
 
 /* int uart_serial_recv(struct serial *ser, void *buf, unsigned int bufsz)
@@ -266,7 +275,12 @@ int uart_serial_recv(struct serial * ser, void * buf, unsigned int bufsz) {
     
      struct uart_serial * const uart =
         (void*)ser - offsetof(struct uart_serial, base);
-    if (!uart->opened) return -EINVAL;
+
+    lock_acquire(&uart->lock);
+    if (!uart->opened) {
+        lock_release(&uart->lock);
+        return -EINVAL;
+    }
 
     char* dstbuf = (char*) buf;
     
@@ -283,6 +297,7 @@ int uart_serial_recv(struct serial * ser, void * buf, unsigned int bufsz) {
         uart->regs->ier |= IER_DRIE;                    // ready to read in another byte
     }
     restore_interrupts(pie);
+    lock_release(&uart->lock);
     return bufsz;
 }
 
@@ -307,8 +322,12 @@ int uart_serial_recv(struct serial * ser, void * buf, unsigned int bufsz) {
 int uart_serial_send(struct serial * ser, const void * buf, unsigned int bufsz) {
      struct uart_serial * const uart =
         (void*)ser - offsetof(struct uart_serial, base);
+    lock_acquire(&uart->lock);
 
-        if (!uart->opened) return -EINVAL;
+        if (!uart->opened) {
+            lock_release(&uart->lock);
+            return -EINVAL;
+        }
         char* dstbuf = (char*) buf;
         int i = 0;
         for (; i < bufsz; i++) {
@@ -327,6 +346,7 @@ int uart_serial_send(struct serial * ser, const void * buf, unsigned int bufsz) 
         }
         // enable THRE interrupt
         // DO NOT disable THRE interrupt here, it is disabled in the ISR when the txbuf is empty
+    lock_release(&uart->lock);
     return bufsz;
 }
 /* void uart_isr(int srcno, void *aux)

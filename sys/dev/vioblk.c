@@ -154,7 +154,11 @@ static int vioblk_storage_open(struct storage* sto) {
     struct vioblk_storage * const blk =
         (void*)sto - offsetof(struct vioblk_storage, base);
 
-    if (blk->opened) return -EBUSY;
+    lock_acquire(&blk->lock);
+    if (blk->opened) {
+        lock_release(&blk->lock);
+        return -EBUSY;
+    }
 
     //figure out what device stuff we need to do
     blk->opened = 1;
@@ -162,6 +166,7 @@ static int vioblk_storage_open(struct storage* sto) {
     
     // Write 0x1 to QueueReady.
     virtio_enable_virtq(blk->regs, 0);
+    lock_release(&blk->lock); // I got touched while opening
     // FIXME your code goes here
     return 0;
 }
@@ -171,11 +176,15 @@ static void vioblk_storage_close(struct storage* sto) {
     struct vioblk_storage * const blk =
         (void*)sto - offsetof(struct vioblk_storage, base);
 
-    if (!blk->opened) return;
+    lock_acquire(&blk->lock); // stop close from touching me while in use
+    if (!blk->opened) {
+        lock_release(&blk->lock);
+        return;
+    }
     blk->opened = 0;
     disable_intr_source(blk->irqno); //disable in plic
     virtio_reset_virtq(blk->regs, 0); //reset virtq, dunno what it sets lowks
-
+    lock_release(&blk->lock);
     // we should not free in case of re-open
     // kfree((void*)blk->desc);
     // kfree((void*)blk->avail);
@@ -189,11 +198,21 @@ static long vioblk_storage_fetch(struct storage* sto, unsigned long long pos, vo
     struct vioblk_storage * const blk =
         (void*)sto - offsetof(struct vioblk_storage, base);
 
-    if (!blk->opened) return -EINVAL;
-    if (bytecnt == 0) return 0;
+    lock_acquire(&blk->lock);
 
-    if (pos > sto->capacity) return -EINVAL;
-    
+    if (!blk->opened) {
+        lock_release(&blk->lock);
+        return -EINVAL;
+    }
+    if (bytecnt == 0) {
+        lock_release(&blk->lock);
+        return 0;
+    }
+    if (pos > sto->capacity) {
+        lock_release(&blk->lock);
+        return -EINVAL;
+    }
+
     //fill header
     uint64_t sector = pos / 512; // 5.2.6
     blk->header.sector = sector;
@@ -206,9 +225,11 @@ static long vioblk_storage_fetch(struct storage* sto, unsigned long long pos, vo
     bytecnt /= sto->intf->blksz;
     bytecnt *= sto->intf->blksz;
 
-    if (bytecnt == 0) return 0; // for bytecnt < 512
+    if (bytecnt == 0){
+        lock_release(&blk->lock);
+        return 0;
+    }
 
-    lock_acquire(&blk->lock);
 
     // fill descriptor table
     fill_descriptor_table(blk->desc, &blk->header, buf, bytecnt, &blk->status, 1);
@@ -244,9 +265,20 @@ static long vioblk_storage_store(struct storage* sto, unsigned long long pos, co
     struct vioblk_storage * const blk =
         (void*)sto - offsetof(struct vioblk_storage, base);
 
-    if (!blk->opened) return -EINVAL;
-    if (bytecnt == 0) return 0;
-    if (pos > sto->capacity) return -EINVAL;
+    lock_acquire(&blk->lock);
+
+    if (!blk->opened){
+        lock_release(&blk->lock);
+        return -EINVAL;
+    }
+    if (bytecnt == 0) {
+        lock_release(&blk->lock);
+        return 0;
+    }
+    if (pos > sto->capacity) {
+        lock_release(&blk->lock);
+        return -EINVAL;
+    }
 
     // [10/21 15:17] In vioblk_storage_store and vioblk_storage_fetch, writes & reads whose bytecnt are not a multiple of blksz should be rounded down to the nearest blksz. The number of bytes written & read should equal the return value.
     bytecnt /= sto->intf->blksz;
@@ -260,8 +292,6 @@ static long vioblk_storage_store(struct storage* sto, unsigned long long pos, co
     // [10/21 07:04] For vioblk_storage_store and vioblk_storage_fetch, writes & reads that exceed the end of the block device should be truncated. Do not return a negative error code in these scenarios.
     if (pos + bytecnt > sto->capacity) bytecnt = sto->capacity - pos;
     
-    lock_acquire(&blk->lock);
-
     // fill descriptor table
     fill_descriptor_table(blk->desc, &blk->header, buf, bytecnt, &blk->status, 0);
     // Add message to avail ring
@@ -293,6 +323,7 @@ static int vioblk_storage_cntl(struct storage* sto, int op, void* arg) {
     // FIXME
     struct vioblk_storage * const blk = (void*)sto - offsetof(struct vioblk_storage, base);
 
+    // lock_acquire(&blk->lock); // pray for paris
     if (op == FCNTL_GETEND) {
         if (arg == NULL) return -EINVAL;
         *(unsigned long long*)arg = blk->base.capacity;
@@ -301,6 +332,7 @@ static int vioblk_storage_cntl(struct storage* sto, int op, void* arg) {
     else {
         return -ENOTSUP;
     }
+    // lock_release(&blk->lock);
 }
 
 static void vioblk_isr(int irqno, void* aux) {
@@ -352,7 +384,7 @@ void vioblk_attach(volatile struct virtio_mmio_regs* regs, int irqno) {
     result = virtio_negotiate_features(regs, enabled_features, wanted_features, needed_features);
 
     if (result != 0) {
-        kprintf("%p: virtio feature negotiation failed\n", regs);
+        // kprintf("%p: virtio feature negotiation failed\n", regs);
         return;
     }
 
@@ -391,12 +423,12 @@ void vioblk_attach(volatile struct virtio_mmio_regs* regs, int irqno) {
     
     // Check if the queue is not already in use: read QueueReady, and expect a returned value of zero (0x0).
     if (regs->queue_ready != 0) {
-        kprintf("regs->queue_ready is nonzero, queue already in use. initialization failed\n");
+        // kprintf("regs->queue_ready is nonzero, queue already in use. initialization failed\n");
         return;
     }
     // Read maximum queue size (number of elements) from QueueNumMax. If the returned value is zero (0x0) the queue is not available.
     if (regs->queue_num_max == 0) {
-        kprintf("regs->queue_num_max is zero, queue already in use. initialization failed\n");
+        // kprintf("regs->queue_num_max is zero, queue already in use. initialization failed\n");
         return;
     }
     
