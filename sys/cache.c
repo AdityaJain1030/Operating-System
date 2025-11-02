@@ -60,14 +60,14 @@ struct cache {
 
 // INTERNAL FUNCTION DECLARATIONS
 //
-#ifndef DEBUG_CACHE
+// #ifndef DEBUG_CACHE
 static void lru_remove(struct cache* cache, struct cache_block* block);
 static void lru_add_head(struct cache* cache, struct cache_block* block);
 static struct cache_block* find_block(struct cache* cache, unsigned long long pos);
 static struct cache_block* get_free_block(struct cache* cache);
 static int evict_block(struct cache* cache);
 // NOTE: callers should hold cache->lock for operations that modify metadata.
-#endif
+// #endif
 
 // DEFINITIONS
 /**
@@ -123,58 +123,58 @@ int create_cache(struct storage* disk, struct cache** cptr) {
     return 0;
 }
 
-#ifdef DEBUG_CACHE
+// #ifdef DEBUG_CACHE
 
-/**
- * @brief Reads a CACHE_BLKSZ sized block from the backing interface into the cache.
- * @param cache Pointer to the cache.
- * @param pos Position in the backing storage device. Must be aligned to a multiple of the block
- * size of the backing interface.
- * @param pptr Pointer to the block pointer read from the cache. Assume that CACHE_BLKSZ will always
- * be equal to the block size of the storage disk. Any replacement policy is permitted, as long as
- * your design meets the above specifications.
- * @return 0 on success, negative error code if error
- */
-int cache_get_block(struct cache* cache, unsigned long long pos, void** pptr) {
-    // FIXME
-    if (cache == NULL || pptr == NULL) return -EINVAL;
-    if (pos % CACHE_BLKSZ != 0) return -EINVAL;
+// /**
+//  * @brief Reads a CACHE_BLKSZ sized block from the backing interface into the cache.
+//  * @param cache Pointer to the cache.
+//  * @param pos Position in the backing storage device. Must be aligned to a multiple of the block
+//  * size of the backing interface.
+//  * @param pptr Pointer to the block pointer read from the cache. Assume that CACHE_BLKSZ will always
+//  * be equal to the block size of the storage disk. Any replacement policy is permitted, as long as
+//  * your design meets the above specifications.
+//  * @return 0 on success, negative error code if error
+//  */
+// int cache_get_block(struct cache* cache, unsigned long long pos, void** pptr) {
+//     // FIXME
+//     if (cache == NULL || pptr == NULL) return -EINVAL;
+//     if (pos % CACHE_BLKSZ != 0) return -EINVAL;
 
-    void* buffer = kmalloc(CACHE_BLKSZ);
-    *pptr = buffer;
-    long len = storage_fetch(cache->disk, pos, buffer, CACHE_BLKSZ);
-    if (len < 0) return (int)len;
+//     void* buffer = kmalloc(CACHE_BLKSZ);
+//     *pptr = buffer;
+//     long len = storage_fetch(cache->disk, pos, buffer, CACHE_BLKSZ);
+//     if (len < 0) return (int)len;
 
-    return 0;
-}
+//     return 0;
+// }
 
-/**
- * @brief Releases a block previously obtained from cache_get_block().
- * @param cache Pointer to the cache.
- * @param pblk Pointer to a block that was made available in cache_get_block() (which means that
- * pblk == *pptr for some pptr).
- * @param dirty Indicates whether the block has been modified (1) or not (0). If dirty == 1, the
- * block has been written to. If dirty == 0, the block has not been written to.
- * @return 0 on success, negative error code if error
- */
-void cache_release_block(struct cache* cache, void* pblk, int dirty) {
-    // FIXME
-    if (pblk == NULL || cache == NULL) return;
-    kfree(pblk);
-    return;
-}
+// /**
+//  * @brief Releases a block previously obtained from cache_get_block().
+//  * @param cache Pointer to the cache.
+//  * @param pblk Pointer to a block that was made available in cache_get_block() (which means that
+//  * pblk == *pptr for some pptr).
+//  * @param dirty Indicates whether the block has been modified (1) or not (0). If dirty == 1, the
+//  * block has been written to. If dirty == 0, the block has not been written to.
+//  * @return 0 on success, negative error code if error
+//  */
+// void cache_release_block(struct cache* cache, void* pblk, int dirty) {
+//     // FIXME
+//     if (pblk == NULL || cache == NULL) return;
+//     kfree(pblk);
+//     return;
+// }
 
-/**
- * @brief Flushes the cache to the backing device
- * @param cache Pointer to the cache to flush
- * @return 0 on success, error code if error
- */
-int cache_flush(struct cache* cache) {
-    // FIXME
-    return -ENOTSUP;
-}
+// /**
+//  * @brief Flushes the cache to the backing device
+//  * @param cache Pointer to the cache to flush
+//  * @return 0 on success, error code if error
+//  */
+// int cache_flush(struct cache* cache) {
+//     // FIXME
+//     return -ENOTSUP;
+// }
 
-#else
+// #else
 /**
  * @brief Reads a CACHE_BLKSZ sized block from the backing interface into the cache.
  * @param cache Pointer to the cache.
@@ -579,4 +579,4 @@ static int evict_block(struct cache* cache) {
     condition_broadcast(&cache->cond);
     return 0;
 }
-#endif
+// #endif
