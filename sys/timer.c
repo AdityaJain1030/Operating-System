@@ -16,7 +16,8 @@
 #include "timer.h"
 #include "thread.h"
 #include "riscv.h"
-#include "assert.h"
+#include "misc.h"
+//#include "assert.h"
 #include "intr.h"
 #include "conf.h"
 #include "see.h" // for set_stcmp

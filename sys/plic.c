@@ -14,9 +14,11 @@
 
 #include "conf.h"
 #include "plic.h"
-#include "assert.h"
+//#include "assert.h"
 
 #include <stdint.h>
+
+#include "misc.h"
 
 // INTERNAL MACRO DEFINITIONS
 //

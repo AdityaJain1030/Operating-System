@@ -1,19 +1,9 @@
-/*! @file ktfs.c‌‌‍‍‌‍⁠‌‌​‌‌‌⁠‍‌‌​⁠‍‌‌‌‍​⁠‍‌‌‍⁠​‌‌‍‌​⁠​‍‌‌‌‌‌⁠‍‍‌​⁠⁠‌‌‌​‌​‌‍‌‍‌‍‌‌‍‍​⁠​⁠‌​‍‍‌⁠‌‍‌‍‌​‌‌‍​‌​​‍‌‍‌‍‌​⁠‍‌​‌​‌‍‌⁠​⁠⁠‌
-    @brief KTFS Implementation.
-    @copyright Copyright (c) 2024-2025 University of Illinois
-
-*/
-
-#ifdef KTFS_TRACE
-#define TRACE
-#endif
-
-#ifdef KTFS_DEBUG
-#define DEBUG
-#endif
+// ktfs.c
+// KTFS filesystem implementation.
+// Copyright (c) 2024-2025 University of Illinois
+//got rid of sync as they are already implemented in cache
 
 #include "ktfs.h"
-
 #include "cache.h"
 #include "console.h"
 #include "device.h"
@@ -31,63 +21,25 @@
 // INTERNAL TYPE DEFINITIONS
 //
 
-
-/// @brief File struct for a file in the Keegan Teal Filesystem
+// Represents any open file in KTFS
 struct ktfs_file {
-    // Fill to fulfill spec
-    struct uio_intf*            intf;                // use this as the uio for the ktfs and define the open using this! 
-    uint64_t                    file_size;
-    struct ktfs_dir_entry       dentry;
-    uint64_t                    pos;
-    struct ktfs_filesystem*     fs;
-    struct ktfs_file*           next;               // next file in the linked list
-    struct ktfs_file*           prev;               // previous file in the linked list
-    int                         dirty;              // dirty flag
+    struct uio uio;                    // UIO interface (must be first)
+    struct filesystem* fs;             // Parent filesystem
+    struct ktfs_dir_entry dentry;      // Directory entry (name & inode number)
+    struct ktfs_inode inode;           // Cached inode data
+    uint32_t pos;                      // Current file position
+    uint32_t size;                     // File size in bytes
+    struct ktfs_file* next;            // Next file in open files list
 };
 
-struct ktfs_file_list {
-    struct ktfs_file* head;
-    struct ktfs_file* tail;
-};
-
-static struct ktfs_file_list open_file_list = {
-    .head = NULL,
-    .tail = NULL
-};
-
-
-// ktfs_io or file io used oh wait i see, dont use this
-// struct storage_uio {
-//     struct uio base;
-//     struct storage *sto;
-//     unsigned long pos;
-//     char *buffer;
-// };
-
-
-/*
-
-Look at fsimpl.h!!!!
-
-Need the filesystem struct perhaps because differnet types of file systems have DIFFERENT WAYS to open files and etc
-
-Filesystem layer is responsibel for finding and OPENING files (given a path)
-
-The UIO layer is responsible for reading/writing to already open files!!!!!!!
-
-*/
-/// KTFS File System struct
-struct ktfs_filesystem {
-    struct filesystem intf; 
-    struct cache* backing_cache;        //   underlying cache
-    
-    struct ktfs_superblock sb;
-
-    struct ktfs_inode root_inode;      // root directory inode
-
-    struct ktfs_filesystem* next;       // pointer to next filesystem in filesystem list
-
-    struct ktfs_file_list*  open_files;   // list of open files in this filesystem
+// KTFS filesys
+struct ktfs {
+    struct filesystem fs;              // Filesystem interface (must be first)
+    struct cache* cache;               // Cache for block access
+    struct ktfs_superblock superblock; // Cached superblock
+    struct ktfs_file* open_files_head; // fixed: Head of open files ll
+    int num_open_files;                // Number of currently open files
+    struct lock fs_lock;               // Filesystem-wide lock
 };
 
 // List of file systems
@@ -115,446 +67,515 @@ static const struct uio_intf ktfs_uio_intf = {
 // INTERNAL FUNCTION DECLARATIONS
 //
 
-int ktfs_open(struct filesystem* fs, const char* name, struct uio** uioptr);
-void ktfs_close(struct uio* uio);
-int ktfs_cntl(struct uio* uio, int cmd, void* arg);
-long ktfs_fetch(struct uio* uio, void* buf, unsigned long len);
-long ktfs_store(struct uio* uio, const void* buf, unsigned long len);
-int ktfs_create(struct filesystem* fs, const char* name);
-int ktfs_delete(struct filesystem* fs, const char* name);
-void ktfs_flush(struct filesystem* fs);
+static int read_superblock(struct ktfs* ktfs);
+static int read_inode(struct ktfs* ktfs, uint16_t inode_num, struct ktfs_inode* inode);
+static int find_file_in_directory(struct ktfs* ktfs, const char* name, struct ktfs_dir_entry* dentry);
+static uint32_t get_data_block_number(struct ktfs* ktfs, struct ktfs_inode* inode, uint32_t file_block_idx);
+static int read_file_data(struct ktfs* ktfs, struct ktfs_inode* inode, uint32_t offset, void* buf, uint32_t len);
 
-void ktfs_listing_close(struct uio* uio);
-long ktfs_listing_read(struct uio* uio, void* buf, unsigned long bufsz);
+// Forward declarations for UIO callbacks 
+static void ktfs_close(struct uio* uio);
+static long ktfs_fetch(struct uio* uio, void* buf, unsigned long len);
+static int ktfs_cntl(struct uio* uio, int cmd, void* arg);
 
-/**
- * @brief Mounts the file system with associated backing cache
- * @param cache Pointer to cache struct for the file system
- * @return 0 if mount successful, negative error code if error
- */
+// Fwd declarations for filesystem-level callbacks 
+static int ktfs_open(struct filesystem* fs, const char* name, struct uio** uioptr);
+static int ktfs_create(struct filesystem* fs, const char* name);
+static int ktfs_delete(struct filesystem* fs, const char* name);
+static void ktfs_flush(struct filesystem* fs);
+
+// UIO interface functions
+static const struct uio_intf ktfs_file_intf = {
+    .close = &ktfs_close,
+    .read = &ktfs_fetch,
+    .write = NULL,  // Read-only for CP1
+    .cntl = &ktfs_cntl
+};
+
+// EXPORTED FUNCTION DEFINITIONS
+//
+
+// Mounts the file system with associated backing cache
 int mount_ktfs(const char* name, struct cache* cache) {
-    // FIXME: No :(
-
-    struct ktfs_filesystem* fs = (struct ktfs_filesystem*)kmalloc(sizeof(struct ktfs_filesystem));
-    fs->backing_cache = cache;
-
-    // need to read superblock?
-    uint8_t* sb_ptr;
-    cache_get_block(cache, 0, &sb_ptr);    // request superblock from underlying hardware
-    struct ktfs_superblock* disk_sb = (struct ktfs_superblock*) sb_ptr;
-    fs->sb = *disk_sb; 
+    struct ktfs* ktfs;
+    int result;
     
-
-    // set root of inode pointer??
-    uint32_t inode_table_start_block = 1 + fs->sb.inode_bitmap_block_count + fs->sb.bitmap_block_count; // superblock is block 0
-
-    // get the inode block 0
-    uint8_t* inode_block_ptr;
-    cache_get_block(cache, inode_table_start_block, &inode_block_ptr);
-    fs->root_inode = *((struct ktfs_inode*) inode_block_ptr);               // first inode is root directory inode
-
-    // intiailize the filesystem itnterface
-    fs->intf.open = ktfs_open;
-    fs->intf.create = ktfs_create;
-    fs->intf.delete = ktfs_delete;
-    fs->intf.flush = ktfs_flush;
-
-
-    // Add to file system list
-    if (!fs_list.head)
-    {
-        fs_list.head = fs;
-        fs_list.tail = fs;
-        fs->next = NULL;
+    if (name == NULL || cache == NULL) {
+        return -EINVAL;
     }
-    else
-    {
-        fs_list.tail->next = fs;
-        fs_list.tail = fs;
-        fs->next = NULL;
+    
+    // Allocate KTFS struct
+    ktfs = kcalloc(1, sizeof(struct ktfs));
+    if (ktfs == NULL) {
+        return -ENOMEM;
     }
+    
+    // Initialize KTFS
+    ktfs->cache = cache;
+    ktfs->num_open_files = 0;
+    ktfs->open_files_head = NULL;
+    lock_init(&ktfs->fs_lock);
+    
+    // Read and validate superblock
+    result = read_superblock(ktfs);
+    if (result != 0) {
+        kfree(ktfs);
+        return result;
+    }
+    
+    // Validate superblock fields
+    if (ktfs->superblock.block_count == 0 ||
+        ktfs->superblock.inode_block_count == 0) {
+        kfree(ktfs);
+        return -EINVAL;
+    }
+    
+    // Initialize the embedded filesystem interface and attach to VFS
+    ktfs->fs.open = &ktfs_open;
+    ktfs->fs.create = &ktfs_create;
+    ktfs->fs.delete = &ktfs_delete;
+    ktfs->fs.flush = &ktfs_flush;
 
-    attach_filesystem(name, fs);            // Mounts the actual file system (purely mounting)
-    return -ENOTSUP;
+    result = attach_filesystem(name, &ktfs->fs);
+    if (result != 0) {
+        kfree(ktfs);
+        return result;
+    }
+    
+    return 0;
 }
 
-/**
- * @brief Opens a file or ls (listing) with the given name and returns a pointer to the uio through
- * the double pointer
- * @param name The name of the file to open or "\" for listing (CP3)
- * @param uioptr Will return a pointer to a file or ls (list) uio pointer through this double
- * pointer
- * @return 0 if open successful, negative error code if error
- */
+// Opens a file with the given name
 int ktfs_open(struct filesystem* fs, const char* name, struct uio** uioptr) {
-    // FIXME
-    /*
-    Model???
+    struct ktfs* ktfs = (struct ktfs*)fs;
+    struct ktfs_file* file;
+    struct ktfs_dir_entry dentry;
+    int result;
     
-    ktfs_file first member is ktfs_uio. Now we initialize that!
-    
-    
-    */
-
-
-    // SET THE UIOPTR TO BE THE UIO FROMTHE KTFS FILE!!!!!!
-    // assume that the fs passed in is the KTFS (since it most lekly is)
-    struct ktfs_filesystem* ktfs_fs = (struct ktfs_filesystem*) fs;             // since it will be first member always
-    
-    // get the superblock
-    struct ktfs_superblock sb = ktfs_fs->sb;
-    uint32_t inode_table_start_block = 1 + sb.inode_bitmap_block_count + sb.bitmap_block_count; // superblock is block 0
-    // We know the denstry size from DEN_SIZE macro
-    uint32_t inodes_per_block = KTFS_BLKSZ / KTFS_INOSZ;
-    uint32_t dentries_per_block = KTFS_BLKSZ / KTFS_DENSZ;
-    
-    // number of inodes in use/in the data block of dentries
-    uint32_t total_dentries = ktfs_fs->root_inode.size / KTFS_DENSZ; // root directory inode size holds number of dentries
-
-
-
-
-    // loop through all dentries to find
-    for (int i = 0; i < total_dentries; i++)
-    {
-        uint32_t dentry_block_index = i / dentries_per_block;
-        uint32_t dentry_index_in_block = i % dentries_per_block;
-        uint8_t* data_block;    // block of dentries
-
-        // either in direct or indirect
-
-        // get the data block for the dentry
-
-        // direct
-        if (dentry_block_index < KTFS_NUM_DIRECT_DATA_BLOCKS)
-        {
-            cache_get_block(ktfs_fs->backing_cache, ktfs_fs->root_inode.block[dentry_block_index], &data_block);
-        }
-        else if (dentry_block_index < KTFS_NUM_DIRECT_DATA_BLOCKS + (KTFS_BLKSZ / sizeof(uint32_t)))
-        {
-            // indirect
-            uint32_t indirect_index = dentry_block_index - KTFS_NUM_DIRECT_DATA_BLOCKS;                 // indirect index
-            uint8_t* indirect_block;
-            cache_get_block(ktfs_fs->backing_cache, ktfs_fs->root_inode.indirect, &indirect_block);     // get the indirect block
-            uint32_t* indirect_block_ptrs = (uint32_t*) indirect_block;                                 // each indirect block "entry" is 4 bytes which is the index of actual block
-            uint32_t data_block_index = indirect_block_ptrs[indirect_index];                            // use indirect index to get where the datablock actually is
-            cache_get_block(ktfs_fs->backing_cache, data_block_index, &data_block);                     // get the actual data block
-        }
-        else
-        {
-            // doubly indirect
-            // number of pointers we have per block
-            uint32_t PTRS_PER_BLOCK = KTFS_BLKSZ / sizeof(uint32_t);
-            uint32_t base = KTFS_NUM_DIRECT_DATA_BLOCKS + PTRS_PER_BLOCK;
-
-            // relative index within the double-indirect range
-            uint32_t raw_index = dentry_block_index - base;
-
-            // indices within each level
-            uint32_t dindirect_index = raw_index / (PTRS_PER_BLOCK * PTRS_PER_BLOCK);       // doubly indirect index
-            uint32_t indirect_index = (raw_index / PTRS_PER_BLOCK) % PTRS_PER_BLOCK;        // indirect index. Need to mod since it wraps
-            uint32_t direct_index = raw_index % PTRS_PER_BLOCK;                               // direct index
-            
-
-            uint8_t* dindirect_block;
-            cache_get_block(ktfs_fs->backing_cache, ktfs_fs->root_inode.dindirect[dindirect_index], &dindirect_block);
-            uint32_t* indirect_ptrs = (uint32_t*) dindirect_block;
-
-            uint8_t* indirect_block;
-            cache_get_block(ktfs_fs->backing_cache, indirect_ptrs[indirect_index], &indirect_block);
-            uint32_t* data_ptrs = (uint32_t*) indirect_block;
-
-            uint32_t data_block_index = data_ptrs[direct_index];
-            
-            cache_get_block(ktfs_fs->backing_cache, data_block_index, &data_block);
-        }
-        struct ktfs_dir_entry* dentry_ptr = (struct ktfs_dir_entry*)(data_block + (dentry_index_in_block * KTFS_DENSZ));    // locate the specific dentry
-        // found the file
-        if (strcmp(dentry_ptr->name, name) == 0)
-        {
-            // get the Inode for the file
-            uint16_t inode_number = dentry_ptr->inode;
-            uint32_t inode_block_index = inode_number / inodes_per_block;
-            uint32_t inode_index_in_block = inode_number % inodes_per_block;
-            uint8_t* inode_block;
-            cache_get_block(ktfs_fs->backing_cache, inode_table_start_block + inode_block_index, &inode_block);
-            struct ktfs_inode* inode_ptr = (struct ktfs_inode*)(inode_block + (inode_index_in_block * KTFS_INOSZ));
-             // we assume one file system, so just use fs_list.head
-            struct ktfs_file* open_file = kmalloc(sizeof(open_file));   //  create new open file
-            uio_init0((struct uio*) open_file, &ktfs_uio_intf);                   //   setup uio interface for the file, also uio is first member of this
-            open_file->file_size = inode_ptr->size;
-            open_file->fs = ktfs_fs;
-            open_file->pos = 0;
-            open_file->dirty = 0;
-            open_file->dentry = *dentry_ptr;    // copy the dentry info
-            if (open_file_list.head == NULL)
-            {
-                open_file_list.head = open_file;
-                open_file_list.tail = open_file;
-                open_file->prev = NULL;
-            }
-            else
-            {
-                open_file_list.tail->next = open_file;
-                open_file->prev = open_file_list.tail;      // set previous pointer
-                open_file_list.tail = open_file;
-            }
-            open_file->next = NULL;
-        }
+    if (fs == NULL || name == NULL || uioptr == NULL) {
+        return -EINVAL;
     }
-
-
-    return -ENOTSUP;
+    
+    lock_acquire(&ktfs->fs_lock);
+    
+    // Find the file in the directory
+    result = find_file_in_directory(ktfs, name, &dentry);
+    if (result != 0) {
+        lock_release(&ktfs->fs_lock);
+        return result;
+    }
+    
+    // Allocate file structure
+    file = kcalloc(1, sizeof(struct ktfs_file));
+    if (file == NULL) {
+        lock_release(&ktfs->fs_lock);
+        return -ENOMEM;
+    }
+    
+    // Initialize file structure
+    file->fs = fs;
+    memcpy(&file->dentry, &dentry, sizeof(struct ktfs_dir_entry));
+    file->pos = 0;
+    file->next = NULL;
+    
+    // Read the inode
+    result = read_inode(ktfs, dentry.inode, &file->inode);
+    if (result != 0) {
+        kfree(file);
+        lock_release(&ktfs->fs_lock);
+        return result;
+    }
+    
+    file->size = file->inode.size;
+    
+    // Initialize UIO interface
+    uio_init1(&file->uio, &ktfs_file_intf);
+    
+    // Add to open files list (at the head)
+    file->next = ktfs->open_files_head;
+    ktfs->open_files_head = file;
+    ktfs->num_open_files++;
+    
+    *uioptr = &file->uio;
+    
+    lock_release(&ktfs->fs_lock);
+    return 0;
 }
 
-/**
- * @brief Closes the file that is represented by the uio struct
- * @param uio The file io to be closed
- * @return None
- */
+// Closes the file that is represented by the uio struct
 void ktfs_close(struct uio* uio) {
-    // FIXME
-    // THE IO POINTER BASED UPON ABOVE STRUCT IS THE FIRST!!!!!!!!!!!!! SO WE CAN JUST GET THE STRUCT HERE!!!!!!
-    // can cast the uio pointer into uio interface which is first memebr of ktfs_file_struct so we can just direcltu cast into ktfs)ile struct
-    if (uio == NULL)
-    {
-        return;
-    }
-
-    struct ktfs_file* file = (struct ktfs_file*) uio;
-    // remove from open file list
-    if (file->prev == NULL && file->next == NULL) // head and tail of list
-    {
-        open_file_list.head = NULL;
-        open_file_list.tail = NULL;
-    }
-    else if (file->prev == NULL)    // head of list has a next
-    {
-        open_file_list.head = file->next;
-        file->next->prev = NULL;
-    }
-    else if (file->next == NULL) // tail of list
-    {
-        file->prev->next = NULL;
-        open_file_list.tail = file->prev;   // update tail
-    }
-    else 
-    {
-        file->prev->next = file->next;
-        file->next->prev = file->prev; // set the next prev member to point to file to be removed prev
-    }
-
-    /*
+    struct ktfs_file* file;
+    struct ktfs* ktfs;
     
-        REPLACE WITH THE CORRECT CACHE IMPLENETAITON DO NOT USE KTFS_FLUSH!!!!!!!!!!!
-    */
-    ktfs_flush((struct filesystem*) file->fs);     // flush contents to device
-
-    kfree(file);   // free the file struct
-
-
-    return;
+    if (uio == NULL) return;
+    
+    // Get file from UIO (uio is first member of ktfs_file)
+    file = (struct ktfs_file*)uio;
+    ktfs = (struct ktfs*)file->fs;
+    
+    lock_acquire(&ktfs->fs_lock);
+    
+    // Remove from open files list
+    struct ktfs_file** curr = &ktfs->open_files_head;
+    while (*curr) {
+        if (*curr == file) {
+            *curr = file->next; // Unlink
+            ktfs->num_open_files--;
+            break;
+        }
+        curr = &(*curr)->next;
+    }
+    
+    lock_release(&ktfs->fs_lock);
+    
+    // Free the file structure
+    kfree(file);
 }
 
-/*
-Helper function for locating data block and putting it in
-
-*/
-
-void ktfs_get_block(struct ktfs_filesystem* fs, uint16_t inode_number, uint32_t block_num, uint8_t** data_block_ptr) {
-    // assumes we give it a valid inode
-
-    // get the inode table start_block
-    uint32_t inode_table_start_block = 1 + fs->sb.inode_bitmap_block_count + fs->sb.bitmap_block_count;     // superblock is block 0
-
-    // get the Inode for the block
-    uint32_t inode_block_index = inode_number / (KTFS_BLKSZ / KTFS_INOSZ);      // divide by Inodes per block
-    uint32_t inode_index_in_block = inode_number % (KTFS_BLKSZ / KTFS_INOSZ);
-    uint8_t* inode_block;
-
-    cache_get_block(fs->backing_cache, inode_table_start_block + inode_block_index, &inode_block);
-    struct ktfs_inode* inode_ptr = (struct ktfs_inode*)(inode_block + (inode_index_in_block * KTFS_INOSZ));
-    // direct
-    if (block_num < KTFS_NUM_DIRECT_DATA_BLOCKS)
-    {
-        cache_get_block(fs->backing_cache, inode_ptr->block[block_num], (void**) data_block_ptr);
-    }
-    else if (block_num < KTFS_NUM_DIRECT_DATA_BLOCKS + (KTFS_BLKSZ / sizeof(uint32_t)))
-    {
-        // indirect
-        uint32_t indirect_index = block_num - KTFS_NUM_DIRECT_DATA_BLOCKS;                           // indirect index
-        uint8_t* indirect_block;
-        cache_get_block(fs->backing_cache, inode_ptr->indirect, &indirect_block);                   // get the indirect block
-        uint32_t* indirect_block_ptrs = (uint32_t*) indirect_block;                                 // each indirect block "entry" is 4 bytes which is the index of actual block
-        uint32_t data_block_index = indirect_block_ptrs[indirect_index];                            // use indirect index to get where the datablock actually is
-        cache_get_block(fs->backing_cache, data_block_index, (void**) data_block_ptr);                     // get the actual data block
-    }
-    else
-    {
-        // doubly indirect
-        // number of pointers we have per block
-        uint32_t PTRS_PER_BLOCK = KTFS_BLKSZ / sizeof(uint32_t);
-        uint32_t base = KTFS_NUM_DIRECT_DATA_BLOCKS + PTRS_PER_BLOCK;
-
-        // relative index within the double-indirect range
-        uint32_t raw_index = block_num - base;
-
-        // indices within each level
-        uint32_t dindirect_index = raw_index / (PTRS_PER_BLOCK * PTRS_PER_BLOCK);       // doubly indirect index
-        uint32_t indirect_index = (raw_index / PTRS_PER_BLOCK) % PTRS_PER_BLOCK;        // indirect index. Need to mod since it wraps
-        uint32_t direct_index = raw_index % PTRS_PER_BLOCK;                               // direct index
-        
-
-        uint8_t* dindirect_block;
-        cache_get_block(fs->backing_cache, inode_ptr->dindirect[dindirect_index], &dindirect_block);
-        uint32_t* indirect_ptrs = (uint32_t*) dindirect_block;
-
-        uint8_t* indirect_block;
-        cache_get_block(fs->backing_cache, indirect_ptrs[indirect_index], &indirect_block);
-        uint32_t* data_ptrs = (uint32_t*) indirect_block;   
-    
-        uint32_t data_block_index = data_ptrs[direct_index];
-        
-        cache_get_block(fs->backing_cache, data_block_index, (void**) data_block_ptr);
-    }
-}
-
-/**
- * @brief Reads data from file attached to uio into provided argument buffer
- * @param uio uio of file to be read
- * @param buf Buffer to be filled
- * @param len Number of bytes to read
- * @return Number of bytes read if successful, negative error code if error
- */
+// Reads data from file attached to uio into provided argument buffer
 long ktfs_fetch(struct uio* uio, void* buf, unsigned long len) {
-    // FIXME; we assume reads are consectuive/we read from last ended position
-    struct ktfs_file* file = (struct ktfs_file*) uio;   // can do this since uio is first memebr of uio_intf which is first member of ktfs_file struct
-    int num_blocks_to_read = len / KTFS_BLKSZ; // number of blocks to read
-
-    // cannot read negative
-    if (file->file_size - file->pos <= 0)
-    {
-        return -EINVAL; // or -EINNOTSUP idk??
+    struct ktfs_file* file;
+    struct ktfs* ktfs;
+    uint32_t bytes_to_read;
+    int result;
+    
+    if (uio == NULL || buf == NULL) {
+        return -EINVAL;
     }
-    // maximum we can read up to
-    len = min(len, file->file_size - file->pos); // adjust len if it exceeds file size
-    // if (len > file->file_size - file->pos)
-    // {
-    //     return -EINVAL; // cannot read more than how many byts we have left
-    // }
-
-    // iterate through all the blocks we need to read
-    for (int i = file->pos / KTFS_BLKSZ; i < (file->pos / KTFS_BLKSZ) + num_blocks_to_read; i++)
-    {
-        uint8_t* data_block;
-
-        // direct
-        ktfs_get_block(file->fs, file->dentry.inode, i, &data_block);
-        // copy data to buf
-        memcpy(buf + (i * KTFS_BLKSZ), data_block, KTFS_BLKSZ);
+    
+    file = (struct ktfs_file*)uio;
+    ktfs = (struct ktfs*)file->fs;
+    
+    lock_acquire(&ktfs->fs_lock);
+    
+    // Calculate how many bytes to read
+    if (file->pos >= file->size) {
+        lock_release(&ktfs->fs_lock);
+        return 0; // EOF
     }
-
-    // now read the remaining bytes that dont fill a whole block
-    uint32_t remaining_bytes = len % KTFS_BLKSZ;
-    if (remaining_bytes > 0)
-    {
-        // read from the num_blocks to read since that is the next block
-        uint8_t* data_block;
-        ktfs_get_block(file->fs, file->dentry.inode, num_blocks_to_read, &data_block);
-        memcpy(buf + (num_blocks_to_read * KTFS_BLKSZ), data_block, remaining_bytes);
-        
+    
+    bytes_to_read = len;
+    if (file->pos + bytes_to_read > file->size) {
+        bytes_to_read = file->size - file->pos;
     }
-    file->pos += len;   // update position
-    return len;
-    // return -ENOTSUP;
+    
+    // Read data
+    result = read_file_data(ktfs, &file->inode, file->pos, buf, bytes_to_read);
+    if (result < 0) {
+        lock_release(&ktfs->fs_lock);
+        return result;
+    }
+    
+    // Update file pos
+    file->pos += bytes_to_read;
+    
+    lock_release(&ktfs->fs_lock);
+    return bytes_to_read;
 }
 
-
-/**
- * @brief Write data from the provided argument buffer into file attached to uio
- * @param uio The file to be written to
- * @param buf The buffer to be read from
- * @param len Number of bytes to write from the buffer to the file
- * @return Number of bytes written from the buffer to the file system if sucessful, negative error
- * code if error
- */
-long ktfs_store(struct uio* uio, const void* buf, unsigned long len) {
-    // FIXME
-    return -ENOTSUP;
-}
-
-/**
- * @brief Create a new file in the file system
- * @param fs The file system in which to create the file
- * @param name The name of the file
- * @return 0 if successful, negative error code if error
- */
-int ktfs_create(struct filesystem* fs, const char* name) {
-    // FIXME
-    return -ENOTSUP;
-}
-
-/**
- * @brief Deletes a certain file from the file system with the given name
- * @param fs The file system to delete the file from
- * @param name The name of the file to be deleted
- * @return 0 if successful, negative error code if error
- */
-int ktfs_delete(struct filesystem* fs, const char* name) {
-    // FIXME
-    return -ENOTSUP;
-}
-
-/**
- * @brief Given a file io object, a specific command, and possibly some arguments, execute the
- * corresponding functions
- * @details Any commands such as (FCNTL_GETEND, FCNTL_GETPOS, ...) should pass back through the arg
- * variable. Do not directly return the value.
- * @details FCNTL_GETEND should pass back the size of the file in bytes through the arg variable.
- * @details FCNTL_SETEND should set the size of the file to the value passed in through arg.
- * @details FCNTL_GETPOS should pass back the current position of the file pointer in bytes through
- * the arg variable.
- * @details FCNTL_SETPOS should set the current position of the file pointer to the value passed in
- * through arg.
- * @param uio the uio object of the file to perform the control function
- * @param cmd the operation to execute. KTFS should support FCNTL_GETEND, FCNTL_SETEND (CP2),
- * FCNTL_GETPOS, FCNTL_SETPOS.
- * @param arg the argument to pass in, may be different for different control functions
- * @return 0 if successful, negative error code if error
- */
+// Execute control functions for the file
 int ktfs_cntl(struct uio* uio, int cmd, void* arg) {
-    // FIXME
-    return -ENOTSUP;
+    struct ktfs_file* file;
+    struct ktfs* ktfs;
+    
+    if (uio == NULL) {
+        return -EINVAL;
+    }
+    
+    file = (struct ktfs_file*)uio;
+    ktfs = (struct ktfs*)file->fs;
+    
+    lock_acquire(&ktfs->fs_lock);
+    
+    if (cmd == FCNTL_GETEND) {
+        if (arg == NULL) {
+            lock_release(&ktfs->fs_lock);
+            return -EINVAL;
+        }
+        *(unsigned long long*)arg = file->size;
+        lock_release(&ktfs->fs_lock);
+        return 0;
+    } else if (cmd == FCNTL_GETPOS) {
+        if (arg == NULL) {
+            lock_release(&ktfs->fs_lock);
+            return -EINVAL;
+        }
+        *(unsigned long long*)arg = file->pos;
+        lock_release(&ktfs->fs_lock);
+        return 0;
+    } else if (cmd == FCNTL_SETPOS) {
+        if (arg == NULL) {
+            lock_release(&ktfs->fs_lock);
+            return -EINVAL;
+        }
+        unsigned long long new_pos = *(unsigned long long*)arg;
+        if (new_pos > file->size) {
+            lock_release(&ktfs->fs_lock);
+            return -EINVAL; // Can't seek past end in read-only fs
+        }
+        file->pos = (uint32_t)new_pos;
+        lock_release(&ktfs->fs_lock);
+        return 0;
+    } else if (cmd == FCNTL_MMAP) {
+        kprintf("MMAP is not supported yet\n");
+        lock_release(&ktfs->fs_lock);
+        return -ENOTSUP;
+    } else {
+        lock_release(&ktfs->fs_lock);
+        return -ENOTSUP;
+    }
 }
 
-/**
- * @brief Flushes the cache to the backing device
- * @return 0 if flush successful, negative error code if error
- */
+// Flushes the cache to the backing device
 void ktfs_flush(struct filesystem* fs) {
-    // FIXME
-    return;
+    struct ktfs* ktfs;
+    
+    if (fs == NULL) return;
+    
+    ktfs = (struct ktfs*)fs;
+    
+    lock_acquire(&ktfs->fs_lock);
+    
+    // Flush the cache
+    if (ktfs->cache != NULL) {
+        cache_flush(ktfs->cache);
+    }
+    
+    lock_release(&ktfs->fs_lock);
 }
 
-/**
- * @brief Closes the listing device represented by the uio pointer
- * @param uio The uio pointer of ls
- * @return None
- */
+// INTERNAL HELPER FUNCTIONS
+//
+
+// Read the superblock from the filesystem
+static int read_superblock(struct ktfs* ktfs) {
+    void* block;
+    int result;
+    
+    // Get block 0 (superblock)
+    result = cache_get_block(ktfs->cache, 0, &block);
+    
+    if (result != 0) {
+        return result;
+    }
+    
+    // Copy superblock data
+     memcpy(&ktfs->superblock, block, sizeof(struct ktfs_superblock));
+    
+    // Release block
+    cache_release_block(ktfs->cache, block, 0);
+    
+    return 0;
+}
+
+// Read an inode from the filesystem
+static int read_inode(struct ktfs* ktfs, uint16_t inode_num, struct ktfs_inode* inode) {
+    void* block;
+    uint32_t block_num;
+    uint32_t inode_offset;
+    int result;
+    
+    // Calculate which block contains this inode
+    uint32_t inodes_per_block = KTFS_BLKSZ / KTFS_INOSZ;
+    uint32_t inode_block_idx = inode_num / inodes_per_block;
+    uint32_t inode_in_block = inode_num % inodes_per_block;
+    
+    // Calculate actual block number
+    block_num = 1 + ktfs->superblock.inode_bitmap_block_count + 
+                ktfs->superblock.bitmap_block_count + inode_block_idx; // off by one error maybe
+    
+    // Get the block
+    result = cache_get_block(ktfs->cache, block_num * KTFS_BLKSZ, &block);
+    
+    if (result != 0) {
+        return result;
+    }
+    
+    // Copy inode data
+    inode_offset = inode_in_block * KTFS_INOSZ;
+    memcpy(inode, (char*)block + inode_offset, sizeof(struct ktfs_inode));
+    
+    // Release block
+    cache_release_block(ktfs->cache, block, 0);
+    
+    return 0;
+}
+
+// Find a file in the root directory
+static int find_file_in_directory(struct ktfs* ktfs, const char* name, struct ktfs_dir_entry* dentry) {
+    struct ktfs_inode root_inode;
+    uint32_t entries_per_block;
+    uint32_t total_entries;
+    uint32_t entries_read = 0;
+    int result;
+    
+    // Read root directory inode
+    result = read_inode(ktfs, ktfs->superblock.root_directory_inode, &root_inode); // root inode
+    if (result != 0) {
+        return result;
+    }
+    
+    entries_per_block = KTFS_BLKSZ / KTFS_DENSZ;
+    total_entries = root_inode.size / KTFS_DENSZ;
+    
+    // Search through directory entries
+    while (entries_read < total_entries) {
+        uint32_t block_idx = entries_read / entries_per_block;
+        uint32_t entry_in_block = entries_read % entries_per_block;
+        
+        // Get the data block number for this directory block
+        uint32_t block_num = get_data_block_number(ktfs, &root_inode, block_idx);
+        block_num += ktfs->superblock.inode_bitmap_block_count + ktfs->superblock.bitmap_block_count + ktfs->superblock.inode_block_count + 1;
+        // if (block_num == 0) {
+        //     return -EIO;
+        // }
+        
+        // Read the block
+        void* block;
+        result = cache_get_block(ktfs->cache, block_num * KTFS_BLKSZ, &block);
+        
+        if (result != 0) {
+            return result;
+        }
+        
+        // Search entries in this block
+        struct ktfs_dir_entry* entries = (struct ktfs_dir_entry*)block;
+        uint32_t entries_in_this_block = entries_per_block;
+        if (entries_read + entries_in_this_block > total_entries) {
+            entries_in_this_block = total_entries - entries_read;
+        }
+        
+        for (uint32_t i = entry_in_block; i < entries_in_this_block; i++) {
+            if (entries[i].inode != 0 && strcmp(entries[i].name, name) == 0) {
+                memcpy(dentry, &entries[i], sizeof(struct ktfs_dir_entry));
+                cache_release_block(ktfs->cache, block, 0);
+                return 0;
+            }
+        }
+        
+        cache_release_block(ktfs->cache, block, 0);
+        entries_read += entries_in_this_block - entry_in_block;
+    }
+    
+    return -ENOENT;
+}
+
+// Get the actual block number for a file's logical block
+static uint32_t get_data_block_number(struct ktfs* ktfs, struct ktfs_inode* inode, uint32_t file_block_idx) {
+    uint32_t ptrs_per_block = KTFS_BLKSZ / sizeof(uint32_t); // how does this work?? Ill trust it for now
+    void* block;
+    uint32_t block_num;
+    int result;
+    
+    // Direct blocks
+    if (file_block_idx < KTFS_NUM_DIRECT_DATA_BLOCKS) {
+        return inode->block[file_block_idx];
+    }
+    
+    file_block_idx -= KTFS_NUM_DIRECT_DATA_BLOCKS;
+    
+    // Indirect block
+    if (file_block_idx < ptrs_per_block) {
+        if (inode->indirect == 0) return 0;
+        
+        result = cache_get_block(ktfs->cache, inode->indirect * KTFS_BLKSZ, &block);
+        
+        if (result != 0) return 0;
+        
+        block_num = ((uint32_t*)block)[file_block_idx];
+        cache_release_block(ktfs->cache, block, 0);
+        return block_num;
+    }
+    
+    file_block_idx -= ptrs_per_block;
+    
+    // Doubly-indirect blocks (unsure)
+    for (int i = 0; i < KTFS_NUM_DINDIRECT_BLOCKS; i++) {
+        if (file_block_idx < ptrs_per_block * ptrs_per_block) {
+            if (inode->dindirect[i] == 0) return 0;
+            
+            // Read doubly-indirect block
+            result = cache_get_block(ktfs->cache, inode->dindirect[i] * KTFS_BLKSZ, &block);
+            
+            if (result != 0) return 0;
+            
+            uint32_t indirect_idx = file_block_idx / ptrs_per_block;
+            uint32_t indirect_block_num = ((uint32_t*)block)[indirect_idx];
+            cache_release_block(ktfs->cache, block, 0);
+            
+            if (indirect_block_num == 0) return 0;
+            
+            // Read indirect block
+            result = cache_get_block(ktfs->cache, indirect_block_num * KTFS_BLKSZ, &block);
+            
+            if (result != 0) return 0;
+            
+            uint32_t data_idx = file_block_idx % ptrs_per_block;
+            block_num = ((uint32_t*)block)[data_idx];
+            cache_release_block(ktfs->cache, block, 0);
+            return block_num;
+        }
+        file_block_idx -= ptrs_per_block * ptrs_per_block;
+    }
+    
+    return 0; // Block index out of range
+}
+
+// Read data from a file
+static int read_file_data(struct ktfs* ktfs, struct ktfs_inode* inode, uint32_t offset, void* buf, uint32_t len) {
+    uint32_t bytes_read = 0;
+    
+    while (bytes_read < len) {
+        uint32_t block_offset = (offset + bytes_read) % KTFS_BLKSZ;
+        uint32_t file_block_idx = (offset + bytes_read) / KTFS_BLKSZ;
+        uint32_t bytes_to_copy = KTFS_BLKSZ - block_offset;
+        
+        if (bytes_to_copy > len - bytes_read) {
+            bytes_to_copy = len - bytes_read;
+        }
+        
+        // Get the data block number
+        uint32_t block_num = get_data_block_number(ktfs, inode, file_block_idx);
+        if (block_num == 0) {
+            // Sparse file - fill with zeros
+            memset((char*)buf + bytes_read, 0, bytes_to_copy);
+        } else {
+            // Read from the block
+            void* block;
+            int result = cache_get_block(ktfs->cache, block_num * KTFS_BLKSZ, &block);
+            
+            if (result != 0) {
+                return result;
+            }
+            
+            memcpy((char*)buf + bytes_read, (char*)block + block_offset, bytes_to_copy);
+            cache_release_block(ktfs->cache, block, 0);
+        }
+        
+        bytes_read += bytes_to_copy;
+    }
+    
+    return bytes_read;
+}
+
+// Placeholder functions for CP2/CP3
+int ktfs_create(struct filesystem* fs, const char* name) {
+    return -ENOTSUP; // Not supported in read-only filesystem
+}
+
+int ktfs_delete(struct filesystem* fs, const char* name) {
+    return -ENOTSUP; // Not supported in read-only filesystem
+}
+
+long ktfs_store(struct uio* uio, const void* buf, unsigned long len) {
+    return -ENOTSUP; // Not supported in read-only filesystem
+}
+
 void ktfs_listing_close(struct uio* uio) {
-    // FIXME
-    return;
+    // Placeholder for CP3
 }
 
-/**
- * @brief Reads all of the files names in the file system using ls and copies them into the
- * providied buffer
- * @param uio The uio pointer of ls
- * @param buf The buffer to copy the file names to
- * @param bufsz The size of the buffer
- * @return The size written to the buffer
- */
 long ktfs_listing_read(struct uio* uio, void* buf, unsigned long bufsz) {
-    // FIXME
+    // Placeholder for CP3
     return -ENOTSUP;
 }

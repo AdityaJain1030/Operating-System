@@ -1,0 +1,11 @@
+*.o
+*.elf
+compile_commands.json
+.clangd
+.cache
+hello
+ktfs.raw
+blob.raw
+.gdbhist
+.gdbinit
+.vscode
