@@ -56,12 +56,12 @@ static struct ktfs_filesystem_list fs_list = {
 };
 
 // our ktfs uio interface
-static const struct uio_intf ktfs_uio_intf = {
-    .close = ktfs_close,
-    .read  = ktfs_fetch,
-    .write = ktfs_store,
-    .cntl  = ktfs_cntl
-};
+// static const struct uio_intf ktfs_uio_intf = {
+//     .close = ktfs_close,
+//     .read  = ktfs_fetch,
+//     .write = ktfs_store,
+//     .cntl  = ktfs_cntl
+// };
 
 
 // INTERNAL FUNCTION DECLARATIONS
