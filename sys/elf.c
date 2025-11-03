@@ -15,7 +15,8 @@
 #include "elf.h"
 
 #include <stdint.h>
-
+// include console
+#include "console.h"
 #include "conf.h"
 #include "error.h"
 #include "memory.h"
@@ -128,8 +129,10 @@ int elf_load(struct uio* uio, void (**eptr)(void)) {
     __sync_synchronize();
     bytes_read = uio_read(uio, &ehdr, sizeof(ehdr));
     __sync_synchronize();
-    
+
+
     if (bytes_read != sizeof(ehdr)) {
+        kprintf("FAILED BYTES_READ! Bytes Read: %d, Sizeof ehdr: %d\n", bytes_read, sizeof(ehdr));
         return -EBADFMT;
     }
     
@@ -138,15 +141,19 @@ int elf_load(struct uio* uio, void (**eptr)(void)) {
         ehdr.e_ident[1] != 'E' || 
         ehdr.e_ident[2] != 'L' || 
         ehdr.e_ident[3] != 'F') {
+        kprintf("Failed Magic Number!\n");
         return -EBADFMT;
     }
     
+    
     // Validate ELF class and version
     if (ehdr.e_ident[EI_CLASS] != ELFCLASS64) {
+        kprintf("Failed Elf Class & Version!\n");
         return -EBADFMT;
     }
     
     if (ehdr.e_ident[EI_DATA] != ELFDATA2LSB) {
+        kprintf("Failed Endian!\n");
         return -EBADFMT;  // RISC-V is little-endian
     }
     
@@ -180,7 +187,6 @@ int elf_load(struct uio* uio, void (**eptr)(void)) {
     if (ehdr.e_phentsize != sizeof(struct elf64_phdr)) {
         return -EBADFMT;
     }
-    
     // Validate program header count (prevent excessive allocations)
     if (ehdr.e_phnum == 0 || ehdr.e_phnum > 128) {
         return -EBADFMT;
@@ -191,12 +197,13 @@ int elf_load(struct uio* uio, void (**eptr)(void)) {
     if (ehdr.e_phoff > UINT64_MAX - ph_table_size) {
         return -EBADFMT;
     }
-    
+
+    kprintf("Number of progam headers: %d\n", ehdr.e_phnum);
     // Process program headers
     for (uint16_t i = 0; i < ehdr.e_phnum; i++) {
         struct elf64_phdr phdr;
         unsigned long long phdr_pos = ehdr.e_phoff + (i * ehdr.e_phentsize);
-        
+        kprintf("Iteration i: %d\n", i);
         // Seek to program header
         __sync_synchronize();
         result = uio_cntl(uio, FCNTL_SETPOS, &phdr_pos);
@@ -211,6 +218,7 @@ int elf_load(struct uio* uio, void (**eptr)(void)) {
         __sync_synchronize();
         
         if (bytes_read != sizeof(phdr)) {
+            kprintf("Failed the Bytes_reead!\n");
             return -EBADFMT;
         }
         
@@ -263,7 +271,7 @@ int elf_load(struct uio* uio, void (**eptr)(void)) {
                 __sync_synchronize();
                 bytes_read = uio_read(uio, mem_ptr, (unsigned long)phdr.p_filesz);
                 __sync_synchronize();
-                
+                kprintf("Bytes_reead: %x\n", bytes_read);
                 if (bytes_read != (long)phdr.p_filesz) {
                     return -EIO;
                 }
@@ -273,10 +281,10 @@ int elf_load(struct uio* uio, void (**eptr)(void)) {
             // but since this is a simple loader, we skip that
         }
     }
-    
+    kprintf("REACHED END\n");
     // Set entry point
     *eptr = (void (*)(void))(uintptr_t)ehdr.e_entry;
-    
+    kprintf("Entry point stored in eptr: 0x%lx\n", (uintptr_t)(*eptr));
     // Ensure all writes are visible before returning
     __sync_synchronize();
     

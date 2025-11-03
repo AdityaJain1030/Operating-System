@@ -126,7 +126,7 @@ debug-test: test-kernel.elf
 original-main-kernel.elf: $(OBJS) original_main.o blob.o
 	$(LD) $(LDFLAGS) -T kernel.ld -o $@ $^
 
-run: kernel.elf
+run-original-main-test: original-main-kernel.elf
 	$(QEMU) $(QEMUOPTS) -m 8M -kernel $<
 
 debug: kernel.elf

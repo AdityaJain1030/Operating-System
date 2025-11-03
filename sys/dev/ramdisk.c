@@ -34,8 +34,6 @@ struct ramdisk {
     int opened;
 };
 
-
-
 // INTERNAL FUNCTION DECLARATIONS
 
 static int ramdisk_open(struct storage *sto);
@@ -46,13 +44,6 @@ static int ramdisk_cntl(struct storage *sto, int cmd, void *arg);
 
 // INTERNAL GLOBAL CONSTANTS
 
-// static const struct uio_intf ramdisk_uio_intf = {
-//     .close = &ramdisk_close,
-//     .read = &ramdisk_fetch,
-//     .write = NULL,  // Read-only for CP1
-//     .cntl = &ramdisk_cntl
-// };
-
 static const struct storage_intf ramdisk_intf = {
     .blksz = 1, // KEEP THIS 1
     .open = &ramdisk_open,
@@ -60,12 +51,6 @@ static const struct storage_intf ramdisk_intf = {
     .fetch = &ramdisk_fetch,
     .store = NULL,
     .cntl = &ramdisk_cntl
-};
-struct storage_uio {
-    struct uio base;
-    struct storage *sto;
-    unsigned long pos;
-    char *buffer;
 };
 
 // EXPORTED FUNCTION DEFINITIONS
@@ -96,7 +81,7 @@ void ramdisk_attach() {
     rd->size = sz;
     rd->opened = 0;
 
-    storage_init(&rd->storage, &ramdisk_intf, (unsigned long long)sz);          // need to intialize device
+    storage_init(&rd->storage, &ramdisk_intf, (unsigned long long)sz);
 
     if (register_device(RAMDISK_NAME, DEV_STORAGE, rd) != 0) {
         kfree(rd);
@@ -106,34 +91,7 @@ void ramdisk_attach() {
     }
 }
 
-int ramdisk_make_uio(struct ramdisk *rd, struct uio **uioptr) {
-    return storage_open_uio(&rd->storage, uioptr);
-}
-
-
-
 // INTERNAL FUNCTION DEFINITIONS
-int storage_open_uio(struct storage *sto, struct uio **uioptr) {
-    struct storage_uio *suio;
-    // int result;
-
-    // // Try to open device
-
-    // result = storage_open(sto);
-
-    if (result != 0) return result;
-
-    suio = kcalloc(1, sizeof(*suio));
-
-    // we also need to create an internal buffer
-    // to deal with unaligned reads and writes
-    suio->buffer = kcalloc(1, sto->intf->blksz);
-
-    suio->sto = sto;
-    suio->pos = 0;
-    *uioptr = uio_init1(&suio->base, &storage_uio_intf);
-    return 0;
-}
 
 static int ramdisk_open(struct storage *sto) {
     struct ramdisk *rd;

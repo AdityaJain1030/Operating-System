@@ -28,8 +28,5 @@
     - `-S`: Seciton headers
 - `riscv64-unknown-elf-objdump`
     - `-d`: Dump everything
-    - `f` : Elf Header
-    - `p` : Program header
-    - `d` : Disassembly
 -  `riscv64-unknown-elf-objcopy`: Trasnforms and copies object files
     - `-O binary`:  mini.elf blob.raw ??? or can we just do `mv`

@@ -19,6 +19,7 @@
 #include "thread.h"
 #include "timer.h"
 #include "dev/ramdisk.h"
+#include "elf.h"
 
 #define INITEXE "trek"  // FIXME
 
@@ -108,11 +109,12 @@ void mount_cdrive(void) {
     }
 }
 
+int test_uio_control_ramdisk_read();
 void run_init(void) {
     struct uio* initexe;
     int result;
-
-    // result = open_file(CMNTNAME, INITEXE, &initexe);
+    
+    // result = open_fil   e(CMNTNAME, INITEXE, &initexe);
 
     // if (result != 0) {
     //     kprintf(INITEXE ": %s; terminating\n", error_name(result));
@@ -124,48 +126,62 @@ void run_init(void) {
     //  Note that trek takes in a uio object to output to the console
 
     // loading ramdisk
-    struct storage* str = find_storage(RAMDISK_NAME, INSTNO);
-    ramdisk_make_uio((struct ramdisk*) str, initexe);
-    kprintf("DONE!\n");
+    test_uio_control_ramdisk_read();
 
 }
-// void run_init(void) {
-//     struct uio * trek_term;
-//     struct uio * seedsrc;
-//     unsigned long rngseed = 0xECE391;
 
-//     if(open_file(DEVMNTNAME, "uart1", &trek_term) != 0 || trek_term == NULL) {
-//         kprintf("mount_ktfs(%s%d) failed: %s\n", CDEVNAME, CDEVINST);
-//         halt_failure();
-//     }
-//     if (open_file(DEVMNTNAME, "viorng0", &seedsrc) == 0 && seedsrc != NULL) {
-//         (void)uio_read(seedsrc, &rngseed, sizeof(rngseed));
-//         uio_close(seedsrc);
-//         seedsrc = NULL;
-//     }
 
-//     struct uio* initexe;
-//     int result;
-//     user_entry_t entry = NULL;
-//     result = open_file(CMNTNAME, INITEXE, &initexe);
+int test_uio_control_ramdisk_read() {
+    struct uio* ruio;
+    int retval;
+    ramdisk_attach();
+    open_file(DEVMNTNAME, "ramdisk0", &ruio);
+    char buf[50];
+    unsigned long long pos = 5;
+    retval = uio_cntl(ruio, FCNTL_SETPOS, &pos);
+    if (retval != 0) {
+        kprintf("Failed to set pos of ramdisk\n");
+        return -1;
+    }
+    unsigned long long disksz;
+    retval = uio_cntl(ruio, FCNTL_GETEND, &disksz);
+    if (retval != 0) {
+        kprintf("Failed to get end of disk\n");
+        return -1;
+    }
+    kprintf("disksz = %u\n", disksz);
+    retval = uio_read(ruio, buf, 10);
+    for (int i = 0; i < 10; ++i) {
+        kprintf("buf[%d] = %x\n", i, buf[i]);
+    }
 
-//     if (result != 0) {
-//         kprintf(INITEXE ": %s; terminating\n", error_name(result));
-//         halt_failure();
-//     }
-//     int rv = elf_load(initexe, (void*)&entry);
-//     if(rv != 0) {
-//         kprintf(INITEXE ": %s; terminating\n", error_name(rv));
-//         halt_failure();
-//     }
-//     fsmgr_flushall();
-//     uint32_t *w = (uint32_t*)(uintptr_t)entry;
-//     kprintf("entry 0x%px\n",entry);
-//     kprintf("entry bytes: %08x %08x %08x %08x\n", w[0], w[1], w[2], w[3]);
-//     entry(trek_term);
-//     uio_close(trek_term);
+    retval = uio_cntl(ruio, FCNTL_GETPOS, &pos);
+    if (retval != 0) {
+        kprintf("Failed to get position of ramdisk\n");
+        return -1;
+    }
+    kprintf("Position of ramdisk uio is %u\n", pos);
+    return 0;
+}
 
-//     // FIXME
-//     //  Run your executable here
-//     //  Note that trek takes in a uio object to output to the console
-// }
+int test_elf_load_with_ramdisk_uio() {
+    struct uio* ruio;
+    struct uio* termio;
+    int retval;
+    ramdisk_attach();
+    open_file(DEVMNTNAME, "ramdisk0", &ruio);
+    open_file(DEVMNTNAME, "uart1", &termio);
+    void (*entry_ptr)(void);
+    retval = elf_load(ruio, &entry_ptr);
+    if (retval < 0) {
+        kprintf("elf load failed with retval %d\n", retval);
+        return -1;
+    }
+    retval = spawn_thread("hellothr", entry_ptr, termio);
+    if (retval < 0) {
+        kprintf("spawn thread failed with retval %d\n", retval);
+        return -1;
+    }
+    thread_join(retval);
+    return 0;
+}

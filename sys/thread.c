@@ -32,7 +32,7 @@
 #include "riscv.h"
 #include "intr.h"
 #include "error.h"
-
+#include "console.h"
 #include <stdarg.h>
 
 // COMPILE-TIME PARAMETERS
