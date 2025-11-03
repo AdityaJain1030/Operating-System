@@ -2,7 +2,10 @@
     #include "uio.h"
     //#include "../../sys/console.h"
     void main(struct uio * uio) {
-        uio_printf(uio, "Hello, world!\n");
+        while (1)
+        {
+            uio_printf(uio, "Hello, world!\n");
+        }
     }
     // void main(void)
     // {

@@ -128,12 +128,12 @@ void run_init(void) {
     //     halt_failure();
     // }
 
-    result = open_file(DEVMNTNAME, "uart1", &uart_dev);
-    //result = open_file(DEVMNTNAME, "ramdisk0", &ramdisk_dev);
-    if (result != 0) {
-        kprintf(INITEXE ": %s; terminating\n", error_name(result));
-        halt_failure();
-    }
+    // result = open_file(DEVMNTNAME, "uart1", &uart_dev);
+    // //result = open_file(DEVMNTNAME, "ramdisk0", &ramdisk_dev);
+    // if (result != 0) {
+    //     kprintf("UART1 : %s; terminating\n", error_name(result));
+    //     halt_failure();
+    // }
     // FIXME
     //  Run your executable here
     //  Note that trek takes in a uio object to output to the console
@@ -184,6 +184,10 @@ int test_uio_control_ramdisk_read() {
     kprintf("Position of ramdisk uio is %u\n", pos);
     return 0;
 }
+struct uio {
+    const struct uio_intf *intf;
+    int refcnt;
+};
 
 int test_elf_load_with_ramdisk_uio() {
     struct uio* ruio;
@@ -192,7 +196,12 @@ int test_elf_load_with_ramdisk_uio() {
     kprintf("TEST_ELF_LOAD!\n");
     ramdisk_attach();
     open_file(DEVMNTNAME, "ramdisk0", &ruio);
-    open_file(DEVMNTNAME, "uart1", &termio);
+    int result = open_file(DEVMNTNAME, "uart1", &termio);
+    if (result != 0) {
+        kprintf(" ELF LOAD UART OPENING FIALED!: %s; terminating\n", error_name(result));
+        halt_failure();
+    }
+    kprintf("termoo: %d\n", termio->refcnt);
     void (*entry_ptr)(struct uio*);
     retval = elf_load(ruio,(void (**)(void)) &entry_ptr);
     if (retval < 0) {
