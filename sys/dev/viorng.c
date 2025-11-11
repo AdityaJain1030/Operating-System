@@ -57,7 +57,7 @@ struct viorng_serial {
     int opened;                               // tracks open/close state
 
     struct condition rand_number_ready; ///< signalled when rxbuf becomes not empty
-
+    struct lock lock;
    
     void (*isr)(int irqno, void* aux);       // ISR function pointer
     void* aux;                                // auxiliary pointer for ISR
@@ -155,6 +155,7 @@ void viorng_attach(volatile struct virtio_mmio_regs * regs, int irqno) {
 
     // initialize conditions
     condition_init(&vrng->rand_number_ready, "viorng.rand_number_ready");
+    lock_init(&vrng->lock);
 
     // allocate memory for descriptors
     // need to fill descriptor
@@ -200,12 +201,15 @@ void viorng_attach(volatile struct virtio_mmio_regs * regs, int irqno) {
 int viorng_serial_open(struct serial * ser) {
     struct viorng_serial * const viorng =
         (void*)ser - offsetof(struct viorng_serial, base);
-    
-    if (viorng->opened)
+    lock_acquire(&viorng->lock);
+    if (viorng->opened) {
+        lock_release(&viorng->lock);
         return -EBUSY;
+    }
     virtio_enable_virtq(viorng->regs, 0);                           // specifies which virtqueue to enable
     viorng->opened = 1;                                             // set opened member to 1
     enable_intr_source(viorng->irqno, VIORNG_IRQ_PRIO, viorng_isr, viorng);
+    lock_release(&viorng->lock);
     return 0;
 }
 /* void viorng_serial_close(struct serial *ser)
@@ -225,11 +229,15 @@ int viorng_serial_open(struct serial * ser) {
 void viorng_serial_close(struct serial * ser) {
      struct viorng_serial * const viorng =
         (void*)ser - offsetof(struct viorng_serial, base);
-
-    if (viorng->opened == 0) return;
+    lock_acquire(&viorng->lock);
+    if (viorng->opened == 0) {
+        lock_release(&viorng->lock);
+        return;
+    }
     virtio_reset_virtq(viorng->regs, 0);
     disable_intr_source(viorng->irqno);
     viorng->opened = 0;
+    lock_release(&viorng->lock);
 }
 /* int viorng_serial_recv(struct serial *ser, void *buf, unsigned int bufsz)
  * Inputs:
@@ -254,11 +262,16 @@ void viorng_serial_close(struct serial * ser) {
 int viorng_serial_recv(struct serial * ser, void * buf, unsigned int bufsz) {
     struct viorng_serial * const viorng =
         (void*)ser - offsetof(struct viorng_serial, base);
+    lock_acquire(&viorng->lock);
     if (viorng->opened == 0)
     {
+        lock_release(&viorng->lock);
         return -EINVAL;
     }
-    if (bufsz <= 0) return 0;
+    if (bufsz <= 0) {
+        lock_release(&viorng->lock);
+        return 0;
+    }
     volatile uint16_t oldIndex = viorng->used->idx;
     //  set the length to how many bytes we want to read, viorng device will look at this when it generates random numbers
     viorng->desc[0].addr  = (uintptr_t)buf;
@@ -282,6 +295,7 @@ int viorng_serial_recv(struct serial * ser, void * buf, unsigned int bufsz) {
     }
     restore_interrupts(pie);
     uint32_t len = viorng->used->ring[oldIndex % viorng->virtqueue_size].len;
+    lock_release(&viorng->lock);
     return len;
 }
 /* void viorng_isr(int irqno, void *aux)

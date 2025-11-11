@@ -24,6 +24,7 @@
 #include "testsuite_1.h"
 #include "testsuite_ramdisk.h"
 #include "testsuite_filesystem.h"
+#include "testsuite_vioblk.h"
 
 #ifndef CMNTNAME
 #define CMNTNAME "c"
@@ -64,6 +65,7 @@ void main(void) {
     enable_interrupts();
 
     run_testsuite_ramdisk();
+    // run_testsuite_vioblk();
     run_testsuite_filesystem();
     // mount_cdrive_ramdisk();
 
