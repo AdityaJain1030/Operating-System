@@ -95,7 +95,7 @@ tracks physical pages I believe?
 struct page_chunk {
     struct page_chunk *next;  ///< Next page in list
     unsigned long pagecnt;    ///< Number of pages in chunk
-    uint64_t      address;      // start address of page_chunk
+    //uint64_t      address;      // start address of page_chunk removed?
 };
 
 /**
@@ -107,6 +107,8 @@ struct page_chunk {
  * CHAPTER 12.4 SV39 RISCV. 
  * Chpater 14 for Svpmbt extension
  * Page table entry: N | PBMT | Reserved | PPN[2] = [53:28] | PPN[1] = [27:19] | PPN[0] = [18:10] | RSW | Flags
+ * 
+ * each page table entry is 64 bits. Hence we let the array do pointer arihtmetic for us!
  */
 struct pte {
     uint64_t flags : 8;
@@ -270,7 +272,7 @@ void memory_init(void) {
     
     */
     // Identity mapping of MMIO region as two gigapage mappings
-    for (pma = 0; pma < RAM_START_PMA; pma += GIGA_SIZE)
+    for (pma = 0; pma < RAM_START_PMA; pma += GIGA_SIZE)    // GIGA_SIZE = 0x4000_0000
         main_pt2[VPN2(pma)] = leaf_pte((void *)pma, PTE_R | PTE_W | PTE_G);
 
     // Third gigarange has a second-level subtable
@@ -279,6 +281,8 @@ void memory_init(void) {
     // First physical megarange of RAM is mapped as individual pages with
     // permissions based on kernel image region.
 
+
+    // look at lecture 10/30 : 38:35 Timestamp
     main_pt1_0x80000[VPN1(RAM_START_PMA)] = ptab_pte(main_pt0_0x80000, PTE_G);
 
     for (pp = text_start; pp < text_end; pp += PAGE_SIZE) {
@@ -288,13 +292,14 @@ void memory_init(void) {
     for (pp = rodata_start; pp < rodata_end; pp += PAGE_SIZE) {
         main_pt0_0x80000[VPN0((uintptr_t)pp)] = leaf_pte(pp, PTE_R | PTE_G);
     }
-
+    // 2 * 2^10 = 2 MB of pages = 1 entry in level 1 subtable
     for (pp = data_start; pp < RAM_START + MEGA_SIZE; pp += PAGE_SIZE) {
         main_pt0_0x80000[VPN0((uintptr_t)pp)] = leaf_pte(pp, PTE_R | PTE_W | PTE_G);
     }
 
     // Remaining RAM mapped in 2MB megapages
-
+    // mapping for level 1 subtable
+    // 
     for (pp = RAM_START + MEGA_SIZE; pp < RAM_END; pp += MEGA_SIZE) {
         main_pt1_0x80000[VPN1((uintptr_t)pp)] = leaf_pte(pp, PTE_R | PTE_W | PTE_G);
     }
@@ -332,19 +337,24 @@ void memory_init(void) {
 
 
     // free_chunk_list = new
-    struct page_chunk* head = kmalloc(sizeof(struct page_chunk));  // create the initial page chunk which holds from end of kernel image to end of RAM
-    struct page_chunk* sentinel = kmalloc(sizeof(struct page_chunk));   // create a sentinel
-    if (head == NULL)
+    // old way of using kmalloc. Instead we directly embed!!!! However, maybe we still allocate a sentinel in case?
+    //struct page_chunk* head = kmalloc(sizeof(struct page_chunk));  // create the initial page chunk which holds from end of kernel image to end of RAM
+    //struct page_chunk* sentinel = kmalloc(sizeof(struct page_chunk));   // create a sentinel
+    /*
+        In supervisor/kernel mode we have ALREADY mapped the stuff!!! in the levl 1 subtbale and thast fine!! 
+        so we can directly assign 
+    
+    */
+    struct page_chunk* sentinel = kmalloc(sizeof(struct page_chunk));   // create a sentinel. We can kmalloc this
+    sentinel->next = (struct page_chunk*)(heap_end);                    // embed into acutal page thingy
+    sentinel->next->next = NULL;
+    sentinel->next->pagecnt = ((uintptr_t)RAM_END - (uintptr_t)heap_end) / PAGE_SIZE;        // find total number of pages we can have for user. We use the heap end
+    if (sentinel == NULL)
     {
-        kprintf("FAILED TO ALLOCATE THE FIRST PAGE CHUNK!\n");
+        kprintf("FAILED TO ALLOCATE THE FIRST PAGE SENTINEL!!!!!!!!\n");
         return;
     }
-    head->pagecnt = ((uintptr_t)RAM_END - (uintptr_t)heap_end) / PAGE_SIZE;        // find total number of pages we can have for user. We use the heap end
-    head->next = NULL;
-    head->address = (uint64_t)heap_end;             // start of chunk
-    sentinel->next = head;
-    sentinel->pagecnt = 0;
-    sentinel->address = 1;  // for testing purposes. 
+    sentinel->pagecnt = 0;      // set page count for sentinel to 0
     free_chunk_list = sentinel;
 
 
@@ -373,6 +383,11 @@ mtag_t switch_mspace(mtag_t mtag) {
 
 mtag_t clone_active_mspace(void) {
     // FIXME
+    /*
+        mtag_t = physical address
+    
+    
+    */
     return (mtag_t)0;
 }
 
@@ -400,68 +415,166 @@ void *map_page(uintptr_t vma, void *pp, int rwxug_flags) {
     // FIXME
     // return phsycial pointer as actual address?
     /*
-        walk along page tables, if it is invalid then we have to allocate/create a new one
+        NEED TO EXPLCIILTY TELL CPU THAT TRANSALTION HAS CHANEGD! CPU DOES NOT KNOW THIS
+        USE A TLB FLUSH!!!!!!! CLEAR THE TLB!
+        Use SFENCE.VMA!!!!!!
+            - Allows us to specify specific entries and etc
+            - Could have different ASID for each address space. So essneitaly we specify teh ASID in the SFENCE.VMA and then correpsodning ASID table
+                entries will be flushed!
+            - Look at lecture 10/30 Timestampe: 54:29
+                - specify rs1 = rs2 = x0: Full flush
+
+        DO NOT FORGET TO FLUSHHHHHHHHHHHHHHHHHHHHHHHHHHHh!!!!!!!!
+        CPU may cahce PTE wehre V = 0. SO MAKE SURE YOU FLUSH EVEN IF YOU ARE ADDING ENTRIES
+
+        syntax: asm volatile ("sfence.vma" ::: "memory");
+
+
+        IN MAP PAGE: JUS USE THE LEVEL 1 SUBTABLE!!!!!! As we have R, W, X SO it is dieclty a LEAF!
+
+
+        CP2: Pretty sure that we just use the given L1 table and then allocate leaf node. BUT NO ONE IS ANSWERING MY FRICIKING QUESTION IN DISCROD
+        I AM TALKING TO MYSELF MAN. 
+
+
+
+        Don't forget to set the RWX U G flags!
+
+        I believe we can only map_page in Supervisor Mode!
+
+
+
+
+        Possible edge cases:
+            - 
+    */
+
+    /*
+        General algorithm for mapping:
+        Take vma: Go to PT2 get PT2 entry. PTE2 points to PT1 substable. Check valid bits. If valid
+        we go down sub level. If not valid, we need to allocate a new page
+    
+    
+    
     */
     if (vma & (PAGE_SIZE - 1))  // trick to see if its algiend or not. If its not aligend what do we do?
     {
         // do something not sure yet
+        // throw an exception maybe?
     }
-    
 
 
+    uintptr_t   pt2_pma = (csrr_satp() << 20) >> 8;
+    struct pte*  pt2 = (struct pte*)pt2_pma;
+    // uintptr_t   pt1_ppn = pt2[VPN2(vma)].ppn;
+    // uintptr_t pt1_pma = pt1_ppn << 12;
+    // struct pte* pt1 = (struct pte*) pt1_pma;
+    // uintptr_t pt0_ppn = pt1[VPN1(vma)].ppn;
+    // uintptr_t pt0_pma = pt0_ppn << 12;
+    // struct pte* pt0 = (struct pte*) pt0_pma;
+
+    uintptr_t   pt1_ppn;
+    uintptr_t pt1_pma;
+    struct pte* pt1;
+    uintptr_t pt0_ppn = pt1[VPN1(vma)].ppn;
+    uintptr_t pt0_pma = pt0_ppn << 12;
+    struct pte* pt0 = (struct pte*) pt0_pma;
+    // check if valid first
 
 
-
-    struct pte* pt2_pte = &main_pt2[VPN2(vma)];
-    struct pte* pt1_pte;
-    struct pte* pt0_pte;
-    // check if root entry is valid
-    if (PTE_VALID(*pt2_pte))
+    if (PTE_VALID(pt2[VPN2(vma)]))
     {
-        pt1_pte = (struct pte*) VPN(pt2_pte->ppn);
+        pt1_ppn = pt2[VPN2(vma)].ppn;
+        pt1_pma = pt1_ppn << 12;
+        pt1 = (struct pte*) pt1_pma;
     }
     else
     {
-        // exception???
+        // allocate a new page
     }
-    if (PTE_VALID(*pt1_pte))
+    if (!PTE_VALID(pt1[VPN1(vma)]))  // check if entry in page table 1 is valid (page exists for it i.e. subable 0 exists, otherwise allcoate)
     {
-        pt0_pte = (struct pte*) VPN(pt1_pte->ppn);
+        uintptr_t temp = (uintptr_t) alloc_phys_page(); // allocates one page. Temp is pointer to start of that page which will be our l0 subtablw
+        pt1[VPN1(vma)] = ptab_pte((struct pte*) temp, PTE_G & rwxug_flags);        // sets/creates it
     }
-    else
+    pt0_ppn = pt1[VPN1(vma)].ppn;
+    pt0_pma = pt0_ppn << 12;
+    pt0 = (struct pte*) pt0_pma;
+
+    if (vma <= 0xC0000000)
     {
+        // directly accessed using ppn. Technically we should not be remapping kernel. Please error here
+    }
+    // greater than that its in user space
+    pt0[VPN0(vma)] = leaf_pte(pp, rwxug_flags);
+
+    return (void *) vma;
+
+
+
+
+
+//     //struct pte* pt2_pte = &main_pt2[VPN2(vma)];
+//     struct pte* pt1_pte;
+//     struct pte* pt0_pte;
+//     // check if root entry is valid
+//     if (PTE_VALID(*pt2_pte))
+//     {
+//         pt1_pte = (struct pte*) VPN(pt2_pte->ppn);
+//     }
+//     else
+//     {
+//         // exception???
+//         // for cp2 probably excpetion??
+//     }
+//     if (PTE_VALID(*pt1_pte))
+//     {
+//         pt0_pte = (struct pte*) VPN(pt1_pte->ppn);
+//     }
+//     else
+//     {
         
-        // exception???
-    }
-    /*
-        struct pte {
-        uint64_t flags : 8;
-        uint64_t rsw : 2;
-        uint64_t ppn : 44;                      // 
-        uint64_t reserved : 7;                  //
-        uint64_t pbmt : 2;                      //
-        uint64_t n : 1;
-};
+//         // exception???
+//         // if not valid... then we need to set it valid
+//     }
+//     /*
+//         struct pte {
+//         uint64_t flags : 8;
+//         uint64_t rsw : 2;
+//         uint64_t ppn : 44;                      // 
+//         uint64_t reserved : 7;                  //
+//         uint64_t pbmt : 2;                      //
+//         uint64_t n : 1;
+// };
     
-    */
-    if (PTE_VALID(*pt0_pte))
-    {
-        pt0_pte->flags = rwxug_flags | PTE_V;
-        //pt0_pte->rsw  free for kernel to use
-        pt0_pte->ppn = VPN((uintptr_t) pp); 
-    }
-    else
-    {
-        // exception???
-    }
+//     */
+//     if (PTE_VALID(*pt0_pte))
+//     {
+//         pt0_pte->flags = rwxug_flags | PTE_V;
+//         //pt0_pte->rsw  free for kernel to use
+//         pt0_pte->ppn = VPN((uintptr_t) pp); 
+//     }
+//     else
+//     {
+//         // exception???
+//     }
 
 
-    return (void*) vma;
+//     return (void*) vma;
 }
 
 void *map_range(uintptr_t vma, size_t size, void *pp, int rwxug_flags) {
     // FIXME
-    return NULL;
+    /*
+    DAmn it all. Idk if they are contiuosu or no. 
+    
+    */
+    int num_pages = ROUND_UP(size, PAGE_SIZE) / PAGE_SIZE;
+    for (int i = 0; i < num_pages; i++)
+    {
+        map_page(vma + (i * PAGE_SIZE), (void *)((uintptr_t)(pp) + (i * PAGE_SIZE)), rwxug_flags);
+    }
+    return (void *) vma;
 }
 
 void *alloc_and_map_range(uintptr_t vma, size_t size, int rwxug_flags) {
@@ -537,27 +650,26 @@ void *alloc_phys_pages(unsigned int cnt) {
     }
     // otherwise head->next is not null and we found
     // actual start address
-    uint64_t pages_start_address = actual_chunk->next->address;
-    actual_chunk->next->pagecnt -= cnt;
-    if (actual_chunk->pagecnt > 0)
+    uintptr_t pages_start_address = ((uintptr_t) actual_chunk) + cnt * PAGE_SIZE;
+    if (actual_chunk->pagecnt > cnt)
     {
-        actual_chunk->address += cnt * PAGE_SIZE;
+        prev_chunk->next = (struct page_chunk*) (((uintptr_t) actual_chunk) + cnt * PAGE_SIZE);
+        prev_chunk->next->next = actual_chunk->next;
+        prev_chunk->next->pagecnt = actual_chunk->pagecnt - cnt;
     }
     else    // chunk size is not equal
     {
         prev_chunk->next = actual_chunk->next;
-        kfree(actual_chunk);
     }
-    return (uintptr_t) pages_start_address;
+    return (void*) actual_chunk;
 }
 
 void free_phys_pages(void *pp, unsigned int cnt) {
     // FIXME
     // we do not implement check for double free. Although we can do that later
-    if (cnt <= 0) return;
-    struct page_chunk* freed_chunk = kmalloc(sizeof(struct page_chunk));
+    if (cnt <= 0 || pp == NULL) return; //not sure what to return
+    struct page_chunk* freed_chunk = (struct page_chunk*) pp;
     freed_chunk->pagecnt = cnt;
-    freed_chunk->address = (uint64_t)(uintptr_t) pp;
     freed_chunk->next = free_chunk_list->next;
     free_chunk_list->next = freed_chunk;
     return;
