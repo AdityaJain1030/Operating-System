@@ -385,7 +385,9 @@ mtag_t clone_active_mspace(void) {
     // FIXME
     /*
         mtag_t = physical address
-    
+
+
+        copy ALL the underlying physical memory. Then reset everything
     
     */
     return (mtag_t)0;
@@ -393,11 +395,25 @@ mtag_t clone_active_mspace(void) {
 
 void reset_active_mspace(void) {
     // FIXME
+    /*
+        Need to remove underlying physical memory that has been mapped
+        remove the virtual addreses + page tables!
+
+    
+    
+    */
     return;
 }
 
 mtag_t discard_active_mspace(void) {
     // FIXME
+    /*
+        delte everything, incldinf the root table
+
+        delete the undelribgn physcial memory, and physcial page
+    
+    
+    */
     return (mtag_t)0;
 }
 
@@ -579,7 +595,9 @@ void *map_range(uintptr_t vma, size_t size, void *pp, int rwxug_flags) {
 
 void *alloc_and_map_range(uintptr_t vma, size_t size, int rwxug_flags) {
     // FIXME
-    return NULL;
+    int num_pages = ROUND_UP(size, PAGE_SIZE) / PAGE_SIZE;
+    void* pp = alloc_phys_pages(num_pages);
+    return map_range(vma, size, rwxug_flags);
 }
 
 void set_range_flags(const void *vp, size_t size, int rwxug_flags) {
@@ -589,6 +607,10 @@ void set_range_flags(const void *vp, size_t size, int rwxug_flags) {
 
 void unmap_and_free_range(void *vp, size_t size) {
     // FIXME
+    /*
+    
+    
+    */
     return;
 }
 
