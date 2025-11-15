@@ -202,13 +202,7 @@ static int ramdisk_cntl(struct storage *sto, int cmd, void *arg) {
         *(unsigned long long *)arg = rd->storage.capacity;
         debug("ramdisk_cntl: FCNTL_GETEND returns %llu", rd->storage.capacity);
         return 0;
-    }
-    
-    if (cmd == FCNTL_MMAP) {
-        // kprintf("MMAP is not supported yet\n");
-        return -ENOTSUP;
-    }
-    
+    }    
     debug("ramdisk_cntl: Unsupported command %d", cmd);
     return -ENOTSUP;
 }

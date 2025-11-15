@@ -108,17 +108,13 @@ int elf_load(struct uio* uio, void (**eptr)(void)) {
     
     // Reset file position to beginning
     unsigned long long pos = 0;
-    __sync_synchronize();
     result = uio_cntl(uio, FCNTL_SETPOS, &pos);
-    __sync_synchronize();
     if (result != 0) {
         return -EIO;
     }
     
     // Read ELF header with proper synchronization
-    __sync_synchronize();
     bytes_read = uio_read(uio, &ehdr, sizeof(ehdr));
-    __sync_synchronize();
     
     if (bytes_read != sizeof(ehdr)) {
         return -EBADFMT;
@@ -189,17 +185,13 @@ int elf_load(struct uio* uio, void (**eptr)(void)) {
         unsigned long long phdr_pos = ehdr.e_phoff + (i * ehdr.e_phentsize);
         
         // Seek to program header
-        __sync_synchronize();
         result = uio_cntl(uio, FCNTL_SETPOS, &phdr_pos);
-        __sync_synchronize();
         if (result != 0) {
             return -EIO;
         }
         
         // Read program header
-        __sync_synchronize();
         bytes_read = uio_read(uio, &phdr, sizeof(phdr));
-        __sync_synchronize();
         
         if (bytes_read != sizeof(phdr)) {
             return -EBADFMT;
@@ -243,17 +235,13 @@ int elf_load(struct uio* uio, void (**eptr)(void)) {
                 unsigned long long file_pos = phdr.p_offset;
                 
                 // Validate file offset
-                __sync_synchronize();
                 result = uio_cntl(uio, FCNTL_SETPOS, &file_pos);
-                __sync_synchronize();
                 if (result != 0) {
                     return -EIO;
                 }
                 
                 // Read segment data
-                __sync_synchronize();
                 bytes_read = uio_read(uio, mem_ptr, (unsigned long)phdr.p_filesz);
-                __sync_synchronize();
                 
                 if (bytes_read != (long)phdr.p_filesz) {
                     return -EIO;
@@ -268,8 +256,6 @@ int elf_load(struct uio* uio, void (**eptr)(void)) {
     // Set entry point
     *eptr = (void (*)(void))(uintptr_t)ehdr.e_entry;
     
-    // Ensure all writes are visible before returning
-    __sync_synchronize();
-    
+    // Ensure all writes are visible before returning    
     return 0;
 }
