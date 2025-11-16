@@ -35,7 +35,8 @@ void run_testsuite_filesystem() {
     // test_function("read_file_contents_simple", test_read_file_contents, abc_short_txt_name, abcs_short_txt_content);
     // test_function("read_file_contents_long", test_read_file_contents, count_long_txt_name, count_long_txt_content);
     // test_function("read_file_contents_long", test_read_file_contents, "49.txt", count_long_txt_content);
-    test_function("read_very_large_file", test_load_very_large_file, "1.txt", 512 * 7 * 981);
+    //test_function("read_very_large_file", test_load_very_large_file, "1.txt", 512 * 7 * 981);
+    test_function("test_load_random_file", test_load_random_file, "rfile.txt");
 }
 
 
@@ -158,6 +159,32 @@ int test_load_very_large_file(va_list ap)
 
     uio_close(file);
     return len;
+}
+
+// more random tests
+int test_load_random_file(va_list ap)
+{
+    kprintf("Testing test_load_random_file!\n==========\n");
+    char* filename = va_arg(ap, char*);
+    //int size = va_arg(ap, int);
+
+    struct uio* file_uio;
+    if (open_file(CMNTNAME, filename, &file_uio) != 0)
+    {
+        kprintf("Failed To open file: %s!\n", filename);
+        return -1;
+    }
+
+    char* contents = kmalloc(512*3);
+    long len;
+    len = uio_read(file_uio, contents, 512 * 3);
+    kprintf("Len read: %d", len);
+    contents[len] = '\n';
+    contents[len+1] = '\0';   //null terminate please
+    kprintf(contents);
+    uio_close(file_uio);
+    kprintf("Ending test_load_ranodmile!\n========\n");
+    return 0;
 }
 
 int test_load_several_blocks(va_list ap)

@@ -15,7 +15,8 @@
 #include "elf.h"
 
 #include <stdint.h>
-
+// include console
+#include "console.h"
 #include "conf.h"
 #include "error.h"
 #include "memory.h"
@@ -48,21 +49,30 @@
 // ELF header e_type values
 enum elf_et { ET_NONE = 0, ET_REL, ET_EXEC, ET_DYN, ET_CORE };
 
+/*! @struct elf64_ehdr
+    @brief ELF header struct
+*/
+
+/*
+Very good reference
+https://linux.die.net/man/5/elf
+*/
+
 struct elf64_ehdr {
-    unsigned char e_ident[16];
-    uint16_t e_type;
-    uint16_t e_machine;
-    uint32_t e_version;
-    uint64_t e_entry;
-    uint64_t e_phoff;
-    uint64_t e_shoff;
-    uint32_t e_flags;
-    uint16_t e_ehsize;
-    uint16_t e_phentsize;
-    uint16_t e_phnum;
-    uint16_t e_shentsize;
-    uint16_t e_shnum;
-    uint16_t e_shstrndx;
+    unsigned char e_ident[16];              //  contain the elf magic "\x7fELF": "0x7f454c46"
+    uint16_t e_type;                        //  file type. Should be ET_EXEC
+    uint16_t e_machine;                     //  Required Architecture                
+    uint32_t e_version;                     //  File Version
+    uint64_t e_entry;                       //  Virtual address to which the system first transfers control, thus starting the processs. If no associated entry point, set to 0
+    uint64_t e_phoff;                       //  IMPORTANT: Program header table's offset in bytes
+    uint64_t e_shoff;                       //  Section Header Table's offset
+    uint32_t e_flags;                       //  
+    uint16_t e_ehsize;                      //  Size of this ELF header
+    uint16_t e_phentsize;                   //  Size in bytes of one entry in the file's program header table in ELF file?
+    uint16_t e_phnum;                       //  Number of entries in the program header table; if # of entries is >= PN_XNUM (0xffff) then real number of entries is held in the sh_info member of initial entry in section header table
+    uint16_t e_shentsize;                   //  Size in bytes of each section header
+    uint16_t e_shnum;                       //   Section header number
+    uint16_t e_shstrndx;                    //
 };
 
 enum elf_pt { PT_NULL = 0, PT_LOAD, PT_DYNAMIC, PT_INTERP, PT_NOTE, PT_SHLIB, PT_PHDR, PT_TLS };
@@ -73,14 +83,14 @@ enum elf_pt { PT_NULL = 0, PT_LOAD, PT_DYNAMIC, PT_INTERP, PT_NOTE, PT_SHLIB, PT
 #define PF_R 0x4
 
 struct elf64_phdr {
-    uint32_t p_type;
+    uint32_t p_type;            // if p_type == PT_LOAD load into program
     uint32_t p_flags;
-    uint64_t p_offset;
-    uint64_t p_vaddr;
-    uint64_t p_paddr;
-    uint64_t p_filesz;
-    uint64_t p_memsz;
-    uint64_t p_align;
+    uint64_t p_offset;          //  offset in ELF file where the segment data begins
+    uint64_t p_vaddr;           //  virtual address at which first byte of the segment should be put into memory
+    uint64_t p_paddr;           //  physical address (mostly unused I think)???
+    uint64_t p_filesz;          //  Number of bytes to read from the file
+    uint64_t p_memsz;           //  Number of bytes to reserve in memory for this segment. If p_memz > p_filsz zero the extra bytes
+    uint64_t p_align;           //  CP2: Alignment required in memory
 };
 
 #define EM_RISCV 243
@@ -117,6 +127,7 @@ int elf_load(struct uio* uio, void (**eptr)(void)) {
     bytes_read = uio_read(uio, &ehdr, sizeof(ehdr));
     
     if (bytes_read != sizeof(ehdr)) {
+        kprintf("FAILED BYTES_READ! Bytes Read: %d, Sizeof ehdr: %d\n", bytes_read, sizeof(ehdr));
         return -EBADFMT;
     }
     
@@ -125,15 +136,19 @@ int elf_load(struct uio* uio, void (**eptr)(void)) {
         ehdr.e_ident[1] != 'E' || 
         ehdr.e_ident[2] != 'L' || 
         ehdr.e_ident[3] != 'F') {
+        kprintf("Failed Magic Number!\n");
         return -EBADFMT;
     }
     
+    
     // Validate ELF class and version
     if (ehdr.e_ident[EI_CLASS] != ELFCLASS64) {
+        kprintf("Failed Elf Class & Version!\n");
         return -EBADFMT;
     }
     
     if (ehdr.e_ident[EI_DATA] != ELFDATA2LSB) {
+        kprintf("Failed Endian!\n");
         return -EBADFMT;  // RISC-V is little-endian
     }
     
@@ -167,7 +182,6 @@ int elf_load(struct uio* uio, void (**eptr)(void)) {
     if (ehdr.e_phentsize != sizeof(struct elf64_phdr)) {
         return -EBADFMT;
     }
-    
     // Validate program header count (prevent excessive allocations)
     if (ehdr.e_phnum == 0 || ehdr.e_phnum > 128) {
         return -EBADFMT;
@@ -178,12 +192,13 @@ int elf_load(struct uio* uio, void (**eptr)(void)) {
     if (ehdr.e_phoff > UINT64_MAX - ph_table_size) {
         return -EBADFMT;
     }
-    
+
+    kprintf("Number of progam headers: %d\n", ehdr.e_phnum);
     // Process program headers
     for (uint16_t i = 0; i < ehdr.e_phnum; i++) {
         struct elf64_phdr phdr;
         unsigned long long phdr_pos = ehdr.e_phoff + (i * ehdr.e_phentsize);
-        
+        kprintf("Iteration i: %d\n", i);
         // Seek to program header
         result = uio_cntl(uio, FCNTL_SETPOS, &phdr_pos);
         if (result != 0) {
@@ -194,6 +209,7 @@ int elf_load(struct uio* uio, void (**eptr)(void)) {
         bytes_read = uio_read(uio, &phdr, sizeof(phdr));
         
         if (bytes_read != sizeof(phdr)) {
+            kprintf("Failed the Bytes_reead!\n");
             return -EBADFMT;
         }
         
@@ -242,6 +258,7 @@ int elf_load(struct uio* uio, void (**eptr)(void)) {
                 
                 // Read segment data
                 bytes_read = uio_read(uio, mem_ptr, (unsigned long)phdr.p_filesz);
+                __sync_synchronize();
                 
                 if (bytes_read != (long)phdr.p_filesz) {
                     return -EIO;
@@ -252,7 +269,7 @@ int elf_load(struct uio* uio, void (**eptr)(void)) {
             // but since this is a simple loader, we skip that
         }
     }
-    
+    kprintf("REACHED END\n");
     // Set entry point
     *eptr = (void (*)(void))(uintptr_t)ehdr.e_entry;
     

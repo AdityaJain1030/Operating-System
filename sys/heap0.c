@@ -1,8 +1,8 @@
-/*! @file heap0.c‌‌‍‍‌‍⁠‌‌​‌‌‌⁠‍‌‌​⁠‍‌‌‌‍​⁠‍‌‌‍⁠​‌‌‍‌​⁠​‍‌‌‌‌‌⁠‍‍‌​⁠⁠‌‌‌​‌​‌‍‌‍‌‍‌‌‍‍​⁠​⁠‌​‍‍‌⁠‌‍‌‍‌​‌‌‍​‌​​‍‌‍‌‍‌​⁠‍‌​‌​‌‍‌⁠​⁠⁠‌
-    @brief Simple heap allocator that does not free memory
-    @copyright Copyright (c) 2024-2025 University of Illinois
-
-*/
+// heap0.c - Simple heap allocator that does not free memory
+//
+// Copyright (c) 2024-2025 University of Illinois
+// SPDX-License-identifier: NCSA
+//
 
 #ifdef HEAP_TRACE
 #define TRACE
@@ -63,11 +63,6 @@ struct heap_free_record {
 
 #define ISPOW2(n) (((n) & ((n) - 1)) == 0)
 
-// Round an integer /n/ up or down to next multiple of /k/.
-
-#define ROUND_UP(n, k) (((n) + (k) - 1) / (k) * (k))
-#define ROUND_DOWN(n, k) ((n) / (k) * (k))
-
 // INTERNAL GLOBAL VARIABLES
 //
 
@@ -119,6 +114,8 @@ void kfree(void* ptr) { return heap_free_actual(ptr, __builtin_return_address(0)
 
 void* heap_malloc_actual(size_t size, void* ra) {
     struct heap_alloc_header* hdr;
+    size_t leftover;
+    void* newpage;
     void* ptr;
 
     trace("%s(%zu,ra=%p)", __func__, size, ra);
@@ -129,14 +126,31 @@ void* heap_malloc_actual(size_t size, void* ra) {
 
     if (HEAP_ALLOC_MAX < size) panic("malloc request too large");
 
-    // Check if request is larger than remaining heap (include overflow).
+    // Check if request is larger than remaining heap (include overflow). If we
+    // implement heap growth (HAVE_MEMORY is defined), ask for another page from
+    // the page allocator.
 
     if (size + sizeof(struct heap_alloc_header) <= heap_end - heap_low) {
         // have enough in current pool
         ptr = heap_end - size;
         heap_end = (struct heap_alloc_header*)ptr - 1;
-    } else
-        panic("Out of memory");
+    } else {
+        // need to get another page
+        if (PAGE_SIZE - sizeof(struct heap_alloc_header) < size) panic(NULL);
+
+        // Decide whether to switch to the new page or satisfy allocation
+        // request from new page but keep using old heap. Here, _leftover_ is
+        // the space left in the page after we satisfy the allocation request.
+
+        newpage = alloc_phys_page();
+        ptr = newpage + PAGE_SIZE - size;
+        leftover = PAGE_SIZE - size - sizeof(struct heap_alloc_header);
+
+        if (heap_end - heap_low < leftover) {
+            heap_end = ptr - sizeof(struct heap_alloc_header);
+            heap_low = newpage;
+        }
+    }
 
     hdr = (struct heap_alloc_header*)ptr - 1;
     hdr->magic = HEAP_ALLOC_MAGIC;

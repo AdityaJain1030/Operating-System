@@ -42,6 +42,28 @@ struct ktfs {
     struct lock fs_lock;               // Filesystem-wide lock
 };
 
+// List of file systems
+
+// Definition
+struct ktfs_filesystem_list {
+    struct ktfs_filesystem* head;
+    struct ktfs_filesystem* tail;
+};
+
+static struct ktfs_filesystem_list fs_list = {
+    .head = NULL,
+    .tail = NULL
+};
+
+// our ktfs uio interface
+// static const struct uio_intf ktfs_uio_intf = {
+//     .close = ktfs_close,
+//     .read  = ktfs_fetch,
+//     .write = ktfs_store,
+//     .cntl  = ktfs_cntl
+// };
+
+
 // INTERNAL FUNCTION DECLARATIONS
 //
 
