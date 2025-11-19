@@ -38,7 +38,9 @@ OBJS = \
 	dev/viorng.o \
 	dev/vioblk.o \
 	dev/ramdisk.o \
-
+	memory.o \
+	process.o \
+	syscall.o \
 
 CFLAGS = -Wall -Werror=implicit-function-declaration
 CFLAGS += -fno-omit-frame-pointer -ggdb3 -gdwarf-2
@@ -80,6 +82,8 @@ QEMUOPTS += -device virtio-rng-device,rng=rng0
 QEMUOPTS += -drive file=ktfs.raw,id=blk0,if=none,format=raw,readonly=false
 QEMUOPTS += -device virtio-blk-device,drive=blk0
 
+QEMUDEBUG = -S -gdb tcp::2357
+
 ###########################################################################
 
 all: kernel.elf
@@ -104,7 +108,7 @@ run: kernel.elf
 	$(QEMU) $(QEMUOPTS) -m 8M -kernel $<
 
 debug: kernel.elf
-	$(QEMU) $(QEMUOPTS) -m 8M -kernel $< -S -s
+	$(QEMU) $(QEMUOPTS) -m 8M -kernel $< $(QEMUDEBUG)
 
 ################################TEST_MAIN.C#################################
 
@@ -119,7 +123,7 @@ run-test: test-kernel.elf
 	$(QEMU) $(QEMUOPTS) -m 8M -kernel $<
 
 debug-test: test-kernel.elf
-	$(QEMU) $(QEMUOPTS) -m 8M -kernel $< -S -s
+	$(QEMU) $(QEMUOPTS) -m 8M -kernel $< $(QEMUDEBUG)
 
 ###########################################################################
 
@@ -130,5 +134,5 @@ run-original-main-test: original-main-kernel.elf
 	$(QEMU) $(QEMUOPTS) -m 8M -kernel $<
 
 debug: kernel.elf
-	$(QEMU) $(QEMUOPTS) -m 8M -kernel $< -S -s
+	$(QEMU) $(QEMUOPTS) -m 8M -kernel $< $(QEMUDEBUG)
 

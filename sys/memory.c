@@ -614,7 +614,7 @@ void *alloc_and_map_range(uintptr_t vma, size_t size, int rwxug_flags) {
     // FIXME
     int num_pages = ROUND_UP(size, PAGE_SIZE) / PAGE_SIZE;
     void* pp = alloc_phys_pages(num_pages);
-    return map_range(vma, size, rwxug_flags);
+    return map_range(vma, size, pp, rwxug_flags);
 }
 
 void set_range_flags(const void *vp, size_t size, int rwxug_flags) {
