@@ -345,22 +345,34 @@ void memory_init(void) {
         so we can directly assign 
     
     */
-    struct page_chunk* sentinel = kmalloc(sizeof(struct page_chunk));   // create a sentinel. We can kmalloc this
-    sentinel->next = (struct page_chunk*)(heap_end);                    // embed into acutal page thingy
-    sentinel->next->next = NULL;
-    sentinel->next->pagecnt = ((uintptr_t)RAM_END - (uintptr_t)heap_end) / PAGE_SIZE;        // find total number of pages we can have for user. We use the heap end
-    if (sentinel == NULL)
-    {
-        kprintf("FAILED TO ALLOCATE THE FIRST PAGE SENTINEL!!!!!!!!\n");
-        return;
-    }
-    sentinel->pagecnt = 0;      // set page count for sentinel to 0
-    free_chunk_list = sentinel;
 
+    /*
+     * Mon Nov 17 07:10:12 PM CST 2025: ART CHANGES ==============================================================================================================
+     * (regarding the code below and explanations) no you cannot kmalloc that, that puts it on the kernel heap. instead I figured out the "lazy faulting" strategy.
+     * basically, we can have a certian page fault response configured for trying to translate an address within [USR_START_VMA, USR_END_VMA]. which means we can 
+     * just point the free_chunk_list to the place we want to EMBED it
+     */
+    free_chunk_list = (struct page_chunk *)UMEM_START_VMA;//I'll just deal in increments of the offset from now on since there are no other way to work with raw PMAs (genuinely almost used the abreviation for physical pointers instead)
+    free_chunk_list->next = NULL;
+    free_chunk_list->pagecnt = (UMEM_END_VMA - UMEM_START_VMA)/PAGE_SIZE;
+    
+
+    // END OF ART CHANGES ========================================================================================================================================
+
+
+    //struct page_chunk* sentinel = kmalloc(sizeof(struct page_chunk));   // create a sentinel. We can kmalloc this 
+    // sentinel->next = (struct page_chunk*)(heap_end);                    // embed into acutal page thingy
+    // sentinel->next->next = NULL;
+    // sentinel->next->pagecnt = ((uintptr_t)RAM_END - (uintptr_t)heap_end) / PAGE_SIZE;        // find total number of pages we can have for user. We use the heap end
+    // if (sentinel == NULL)
+    // {
+    //     kprintf("FAILED TO ALLOCATE THE FIRST PAGE SENTINEL!!!!!!!!\n");
+    //     return;
+    // }
+    // sentinel->pagecnt = 0;      // set page count for sentinel to 0
+    // free_chunk_list = sentinel;
 
     // ^
-
-
     // Allow supervisor to access user memory. We could be more precise by only
     // enabling supervisor access to user memory when we are explicitly trying
     // to access user memory, and disable it at other times. This would catch
@@ -381,40 +393,45 @@ mtag_t switch_mspace(mtag_t mtag) {
     return prev;
 }
 
-mtag_t clone_active_mspace(void) {
-    // FIXME
-    /*
-        mtag_t = physical address
 
+/* 
+    Copies all pages and page tables from the active memory space into newly allocated memory.
+    Returns: Tag corresponding to newly allocated memory 
+*/
+mtag_t clone_active_mspace(void) { 
+    //Mon Nov 17 07:35:54 PM CST 2025 - STARTED BY ART MULEY... Ah shoot I didn't realise this was due in mp3
+    //mtag_t original;
 
-        copy ALL the underlying physical memory. Then reset everything
+    //original = csrr_satp();//I forget what exactly this is a pseudo-instruction for (something with x0) but basically there are no side effects on the satp
     
-    */
+    //TODO: make the DEEP copy here.
     return (mtag_t)0;
 }
 
+
+
+/*
+    Unmaps and frees all non-global pages from the active memory space.
+
+    Returns: None
+*/
 void reset_active_mspace(void) {
     // FIXME
-    /*
-        Need to remove underlying physical memory that has been mapped
-        remove the virtual addreses + page tables!
 
-    
-    
-    */
     return;
 }
 
-mtag_t discard_active_mspace(void) {
-    // FIXME
-    /*
-        delte everything, incldinf the root table
 
-        delete the undelribgn physcial memory, and physcial page
-    
-    
-    */
-    return (mtag_t)0;
+
+/*
+    Switches memory spaces to main, unmaps and frees all non-global pages from the previously active memory space.
+
+    Returns: Tag corresponding to main memory space  
+*/
+mtag_t discard_active_mspace(void) {
+    //Mon Nov 17 07:49:44 PM CST 2025 - AMMENDED/STARTED BY ART MULEY
+    reset_active_mspace();
+    return switch_mspace(main_mtag);//TODO: it seems like the function can be just this simple but I need to make sure
 }
 
 // The map_page() function maps a single page into the active address space at
