@@ -5,6 +5,7 @@
 
 */
 
+#include <stdint.h>
 #ifdef MEMORY_TRACE
 #define TRACE
 #endif
@@ -135,7 +136,7 @@ struct pte {
 
 // INTERNAL MACRO DEFINITIONS
 //
-
+#define VMA(vpn) ((vpn) << PAGE_ORDER)
 #define VPN(vma) ((vma) / PAGE_SIZE)
 #define VPN2(vma) ((VPN(vma) >> (2 * 9)) % PTE_CNT) // gets vpn2. Essentially shift out the offset. Then find the page index for the page table
 #define VPN1(vma) ((VPN(vma) >> (1 * 9)) % PTE_CNT)
@@ -433,21 +434,14 @@ void *map_page(uintptr_t vma, void *pp, int rwxug_flags) {
 
         syntax: asm volatile ("sfence.vma" ::: "memory");
 
-
         IN MAP PAGE: JUS USE THE LEVEL 1 SUBTABLE!!!!!! As we have R, W, X SO it is dieclty a LEAF!
-
 
         CP2: Pretty sure that we just use the given L1 table and then allocate leaf node. BUT NO ONE IS ANSWERING MY FRICIKING QUESTION IN DISCROD
         I AM TALKING TO MYSELF MAN. 
 
-
-
         Don't forget to set the RWX U G flags!
 
         I believe we can only map_page in Supervisor Mode!
-
-
-
 
         Possible edge cases:
             - 
@@ -457,9 +451,6 @@ void *map_page(uintptr_t vma, void *pp, int rwxug_flags) {
         General algorithm for mapping:
         Take vma: Go to PT2 get PT2 entry. PTE2 points to PT1 substable. Check valid bits. If valid
         we go down sub level. If not valid, we need to allocate a new page
-    
-    
-    
     */
     if (vma & (PAGE_SIZE - 1))  // trick to see if its algiend or not. If its not aligend what do we do?
     {
@@ -596,11 +587,77 @@ void unmap_and_free_range(void *vp, size_t size) {
 
 int validate_vptr(const void *vp, size_t len, int rwxu_flags) {
     // FIXME
+    // we need to ensure [vp, vp + len) is good to access
+    // how we do that
+    // 1. take the vp and find it and validate
+    // 2. create a for loop that increments by the page size
+    //      if there is an index in this for loop s.t indx < vp + len, and index is invalid
+    //      we return an error
+    //      other wise we are good
+
+    if (len == 0) return 0; // validate 0 bytes
+
+    uintptr_t range_begin = (uintptr_t)vp; // uintptrs are much nicer to work with :)
+    uintptr_t range_end = range_begin + len;
+
+    // we need a way to check to see if len ended up subtracting from 
+    // range_begin due to overflow, so we just check if range_end < range_begin
+    // and update range_end calculation to be range_begin + len accordingly
+    // I feel very smart
+    if (range_end < range_begin) return -EINVAL; // we overflowed... 
+
+    if (wellformed(range_begin) != 1) return -EINVAL; // checks for 10.4.1 in riscv manual II
+
+    struct pte *lvl_2_root = active_space_ptab();
+
+    // we want to check basically each page table covered for validity
+    unsigned long page_start = VPN(range_begin); // get page NUM the addr belongs to (alignment)
+    unsigned long page_end = VPN(range_end);// get page NUM the addr+len belongs to (alignment)
+
+    for (unsigned long i = page_start; i < page_end; i++)
+    {
+        uintptr_t page_aligned_vma  = VMA(i); // get vma for page
+
+        // get vpns
+        int vpn2 = VPN2(page_aligned_vma);
+        int vpn1 = VPN1(page_aligned_vma);
+        int vpn0 = VPN0(page_aligned_vma);
+
+        // checking root level 2 page table
+        struct pte pte2 = lvl_2_root[vpn2];
+
+        //validity checks
+        if (!PTE_VALID(pte2)) return -EINVAL; // invalid pte
+        if (PTE_LEAF(pte2) && ((rwxu_flags & pte2.flags) == 0)) return -EINVAL; // we cannot access this pte
+        if (PTE_LEAF(pte2) && ((rwxu_flags & pte2.flags) != 0)) continue; // valid pte gigapage, go next
+
+        // checking root level 1 page table
+        struct pte *lvl_1_root = pageptr(pte2.ppn);
+        struct pte pte1 = lvl_1_root[vpn1];
+
+        //validity checks
+        if (!PTE_VALID(pte1)) return -EINVAL; // invalid pte
+        if (PTE_LEAF(pte1) && ((rwxu_flags & pte1.flags) == 0)) return -EINVAL; // we cannot access this pte
+        if (PTE_LEAF(pte1) && ((rwxu_flags & pte1.flags) != 0)) continue; // valid pte megapage, go next
+
+        // checking root level 0 page table
+        struct pte *lvl_0_root = pageptr(pte1.ppn);
+        struct pte pte0 = lvl_0_root[vpn0];
+
+        //validity checks
+        if (!PTE_VALID(pte0)) return -EINVAL; // invalid pte
+        if (!PTE_LEAF(pte0)) return -EINVAL; // all nodes are leaf here
+        if (((rwxu_flags & pte0.flags) == 0)) return -EINVAL; // we cannot access this pte
+    }
+
     return 0;
 }
 
 int validate_vstr(const char *vs, int rug_flags) {
     // FIXME
+    // this should be ez we just validate_vptr and then loop over string until we see null
+    // wait what do we do if we dont see null...
+    
     return 0;
 }
 
