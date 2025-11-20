@@ -320,30 +320,37 @@ void memory_init(void) {
         so we can directly assign 
     */
 
+
+
+
+    // Nov 29 4:21 PM CST LXDL CHANGES. Commenting out Art Changes
+
     /*
      * Mon Nov 17 07:10:12 PM CST 2025: ART CHANGES ==============================================================================================================
      * (regarding the code below and explanations) no you cannot kmalloc that, that puts it on the kernel heap. instead I figured out the "lazy faulting" strategy.
      * basically, we can have a certian page fault response configured for trying to translate an address within [USR_START_VMA, USR_END_VMA]. which means we can 
      * just point the free_chunk_list to the place we want to EMBED it
      */
-    free_chunk_list = (struct page_chunk *)UMEM_START_VMA;//I'll just deal in increments of the offset from now on since there are no other way to work with raw PMAs (genuinely almost used the abreviation for physical pointers instead)
-    free_chunk_list->next = NULL;
-    free_chunk_list->pagecnt = (UMEM_END_VMA - UMEM_START_VMA)/PAGE_SIZE;
+    // free_chunk_list = (struct page_chunk *)UMEM_START_VMA;//I'll just deal in increments of the offset from now on since there are no other way to work with raw PMAs (genuinely almost used the abreviation for physical pointers instead)
+    // free_chunk_list->next = NULL;
+    // free_chunk_list->pagecnt = (UMEM_END_VMA - UMEM_START_VMA)/PAGE_SIZE;
     
 
     // END OF ART CHANGES ========================================================================================================================================
 
-    //struct page_chunk* sentinel = kmalloc(sizeof(struct page_chunk));   // create a sentinel. We can kmalloc this 
-    // sentinel->next = (struct page_chunk*)(heap_end);                    // embed into acutal page thingy
-    // sentinel->next->next = NULL;
-    // sentinel->next->pagecnt = ((uintptr_t)RAM_END - (uintptr_t)heap_end) / PAGE_SIZE;        // find total number of pages we can have for user. We use the heap end
-    // if (sentinel == NULL)
-    // {
-    //     kprintf("FAILED TO ALLOCATE THE FIRST PAGE SENTINEL!!!!!!!!\n");
-    //     return;
-    // }
-    // sentinel->pagecnt = 0;      // set page count for sentinel to 0
-    // free_chunk_list = sentinel;
+
+    struct page_chunk* sentinel = kmalloc(sizeof(struct page_chunk));   // create a sentinel. We can kmalloc this 
+    sentinel->next = (struct page_chunk*)(heap_end);                    // embed into acutal page thingy
+    sentinel->next->next = NULL;
+    sentinel->next->pagecnt = ((uintptr_t)RAM_END - (uintptr_t)heap_end) / PAGE_SIZE;        // find total number of pages we can have for user. We use the heap end
+    if (sentinel == NULL)
+    {
+        kprintf("FAILED TO ALLOCATE THE FIRST PAGE SENTINEL!!!!!!!!\n");
+        panic("FAILED TO ALLOCATE THE FIRST PAGE SENTINEL!!!!!!!!\n");
+        return;
+    }
+    sentinel->pagecnt = 0;      // set page count for sentinel to 0
+    free_chunk_list = sentinel;
 
     // ^
     // Allow supervisor to access user memory. We could be more precise by only
@@ -548,6 +555,7 @@ void *map_page(uintptr_t vma, void *pp, int rwxug_flags) {
     {
         // do something not sure yet
         // throw an exception maybe?
+        panic("mapping virtual address, virtual address is NOT page aligned!");
     }
 
 
@@ -820,6 +828,7 @@ void *alloc_phys_pages(unsigned int cnt) {
     {
         kprintf("No avaiable pages can be allocated fro cnt: %d", cnt);
         // shoudl panic here but idk how
+        panic("alloc_phys_pages panic. No available physical pages can be allocated");
         return NULL;
     }
     // otherwise head->next is not null and we found
