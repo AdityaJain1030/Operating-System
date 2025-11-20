@@ -84,19 +84,15 @@ int process_exec(struct uio* exefile, int argc, char** argv) {
     // FIXME
     // todo
     // how this works
-    // 1. load an elf
     // 2. create new page
     // 3. load arguements onto new page
     // 4. create stack on page
     // 5. clear out old page
+    // 1. load an elf
     // 6. set SPP (and SPIE almost forgot)
     // 7. call trap jump with pointers to argc argv
-    
-    void (*entry_ptr)(); // taken from main i need to learn how elf works still.....
-    // 1. load an elf
-    int err = elf_load(exefile, &entry_ptr);
-    uio_close(exefile); 
-    if (err < 0) return err;
+
+    // just look at slides 17 Ill come back to these to fix comments
 
     // 2. create new page
     void* newpage = alloc_phys_page();
@@ -104,10 +100,24 @@ int process_exec(struct uio* exefile, int argc, char** argv) {
     // 3. load arguements onto new page
     // 4. create stack on page
     int stack_sz = build_stack(newpage, argc, argv);
-
+    if (stack_sz < 0) 
+    {
+        free_phys_page(newpage);
+        return stack_sz;
+    }
     // loook at slides 21
     // 5. clear out old page, i dont think we can access anything not in our stack now
     reset_active_mspace();
+    
+    // move this down here per slides 17
+    void (*entry_ptr)(); // taken from main i need to learn how elf works still.....
+    // 1. load an elf
+    int err = elf_load(exefile, &entry_ptr);
+    uio_close(exefile); 
+    if (err < 0) {
+        free_phys_page(newpage);
+        return err;
+    }
 
     // we have to still make the stack discoverable
     // this maps to the last possible address. Its a little weird but this is the layout
@@ -129,7 +139,7 @@ int process_exec(struct uio* exefile, int argc, char** argv) {
     // |   argc/argv  |
     // |______________| (UMEM_END_VMA) 0xFFFFFFFFFF
     uintptr_t page_addr = UMEM_END_VMA - PAGE_SIZE;
-    map_page(page_addr, newpage, PTE_R | PTE_W); // removing X ~~dont think we need X but ill keep it~~ 
+    map_page(page_addr, newpage, PTE_R | PTE_W | PTE_U); // removing X ~~dont think we need X but ill keep it~~ 
 
     // 6. set SPP (and SPIE almost forgot)
     // csrs_sstatus(RISCV_SSTATUS_SPIE | RISCV_SSTATUS_SPP); // this is wrong

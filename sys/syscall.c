@@ -152,7 +152,27 @@ int sysexec(int fd, int argc, char **argv) {
     // call process exec
     // if process exec returns that means the file was invalid
     // return the error code
-    return 0;
+
+    // check if process fd is valid
+    if (fd < 0) return -EBADFD;
+    if (fd >= PROCESS_UIOMAX) return -EBADFD;
+    
+    // check if args are valid
+    if (validate_vptr(argv, sizeof(char*) * (argc+1), PTE_U | PTE_X | PTE_R) != 0) return -EINVAL;
+
+    struct process *running = current_process();
+    if (running->uiotab[fd] == NULL) return -EBADFD;
+
+    struct uio *exefile = running->uiotab[fd];
+    // process_exec does not return!
+    running->uiotab[fd] = NULL;
+
+    // call process_exec
+    int err = process_exec(exefile, argc, argv);
+
+    // if we returned something went wrong and we should tell the 
+    // calling program
+    return err;
 }
 
 /**
@@ -193,7 +213,12 @@ int sysprint(const char *msg) {
     if (valid != 0) return valid; // return invalid reason
    
     //print
-    kprintf(msg);
+    // kprintf(msg);
+    kprintf("Thread <%s:%d> says: %s\n",
+        thread_name(running_thread()),
+        running_thread(),
+        msg);
+
     return 0; 
 }
 
@@ -289,7 +314,10 @@ int sysfsdelete(const char *path) {
  * @return fd number if sucessful else return error that occured -EMFILE or -EBADFD
  */
 
-int sysopen(int fd, const char *path) { return 0; }
+int sysopen(int fd, const char *path) {
+    // check if the 
+    return 0;
+}
 
 /**
  * @brief Closes file or device of specified fd for given process
