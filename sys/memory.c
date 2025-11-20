@@ -655,9 +655,36 @@ int validate_vptr(const void *vp, size_t len, int rwxu_flags) {
 
 int validate_vstr(const char *vs, int rug_flags) {
     // FIXME
-    // this should be ez we just validate_vptr and then loop over string until we see null
+    // this should be ez we just loop and validate_vptr and over each char until we see null
     // wait what do we do if we dont see null...
+    // OPTIMIZATION: what if we get the start_page of vs, validate that,
+    // and then we check if the end_page vma is ... oh thats annoying
+    // idea 2: what if we validate a string up to a certain length, and then walk through it
+    // searching for \0
     
+    // taken from validate_vptr
+    uintptr_t range_begin = (uintptr_t)vs; // uintptrs are much nicer to work with :)
+    uintptr_t curr_end = VMA(VPN(range_begin) + 1); // hack 
+    
+    if (validate_vptr(vs, 1, rug_flags) != 0) return -EINVAL;
+    // if (*vs == '\0') return 0;
+
+    for (;;)
+    {
+        if ((uintptr_t)vs >= curr_end)
+        {
+            // we just check till the next block, setting len to 1 is sufficient to check the
+            // whole page
+            if (validate_vptr(vs, 1, rug_flags) != 0) return -EINVAL;
+            range_begin = (uintptr_t)vs; // uintptrs are much nicer to work with :)
+            curr_end = VMA(VPN(range_begin) + 1); // hack
+
+            // check for overflow
+            if (curr_end < (uintptr_t)vs) return -1;
+        }
+        if (*vs == '\0') return 0;
+        vs += 1;
+    }
     return 0;
 }
 
