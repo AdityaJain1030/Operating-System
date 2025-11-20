@@ -160,6 +160,11 @@ int sysexec(int fd, int argc, char **argv) {
     // check if args are valid
     if (validate_vptr(argv, sizeof(char*) * (argc+1), PTE_U | PTE_X | PTE_R) != 0) return -EINVAL;
 
+    for (int i = 0; i < argc; i++)
+    {
+        if (validate_vstr(argv[i], PTE_R | PTE_W | PTE_U) != 0) return -EINVAL;
+    }
+
     struct process *running = current_process();
     if (running->uiotab[fd] == NULL) return -EBADFD;
 
@@ -315,8 +320,54 @@ int sysfsdelete(const char *path) {
  */
 
 int sysopen(int fd, const char *path) {
-    // check if the 
-    return 0;
+    // check if the fd is valid
+    // then check if path is valid
+    // then if the fd is valid we can create it
+    
+    // fd check
+    if (fd < -1) return -EBADFD;
+    if (fd >= PROCESS_UIOMAX) return -EBADFD;
+    
+    struct process *running = current_process();
+    // if (running->uiotab[fd] != NULL) return -EBADFD;
+
+    // path check
+    int val = validate_vstr(path, PTE_U | PTE_R);
+    if (val != 0) return val;
+
+    // find first free fd
+    if (fd == -1)
+    {
+        for (fd = 0; fd <= PROCESS_UIOMAX; fd++)
+        {
+            // there are no free files
+            if (fd == PROCESS_UIOMAX) return -EMFILE;
+
+            // break after fd is found
+            if (running->uiotab[fd] == NULL) break;
+        }
+    }
+    // we keep this here for the fd != -1 case, in which we need to see if the user provided
+    // fd is busy
+    if (running->uiotab[fd] != NULL) return -EBADFD;
+
+    // everything looks good we can allocate the file
+    char *mpnameptr;
+    char *flnameptr;
+
+    val = parse_path(path, &mpnameptr, &flnameptr);
+    if (val != 0) return val;
+
+    // taken from main.c
+    struct uio *file;
+    val = open_file(mpnameptr, flnameptr, &file);
+    if (val != 0) return val;
+
+    kfree(mpnameptr);
+    kfree(flnameptr);
+    
+    running->uiotab[fd] = file;
+    return fd;
 }
 
 /**
@@ -326,7 +377,19 @@ int sysopen(int fd, const char *path) {
  * @return 0 on success, error on invalid file descriptor or empty file descriptor
  */
 
-int sysclose(int fd) { return 0; }
+int sysclose(int fd) { 
+    // check if the fd is valid
+    // then if it is we close it
+
+    if (fd < 0) return -EBADFD;
+    if (fd >= PROCESS_UIOMAX) return -EBADFD;
+    struct process *running = current_process();
+    if (running->uiotab[fd] == NULL) return -ENOENT;
+
+    uio_close(running->uiotab[fd]);
+    return 0;
+
+}
 
 /**
  * @brief Calls read function of file io on given buffer
