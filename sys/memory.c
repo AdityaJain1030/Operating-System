@@ -679,7 +679,7 @@ int validate_vstr(const char *vs, int rug_flags) {
             range_begin = (uintptr_t)vs; // uintptrs are much nicer to work with :)
             curr_end = VMA(VPN(range_begin) + 1); // hack
 
-            // check for overflow
+            // check for overflow using the trick from validate_vptr
             if (curr_end < (uintptr_t)vs) return -1;
         }
         if (*vs == '\0') return 0;
@@ -771,7 +771,52 @@ unsigned long free_phys_page_count(void) {
 
 int handle_umode_page_fault(struct trap_frame *tfr, uintptr_t vma) {
     // FIXME
-    return 0;  // no handled
+    // To handle umode page faults we first get called from the trap, we see that the page is faulting. 
+    // So we have to check the address. If its in the range of user program, we then check if the pte is valid.
+    // If the PTE is valid then we exit the program because then the only way we fault is if the user dosent have perms for that memory. 
+    // If it is invalid we then create a new page, and map it to the address the usee called from with proper offsets? 
+    if (vma < UMEM_START_VMA || vma >= UMEM_END_VMA) return 0; // out of user mem range
+
+    // get vpn
+    int vpn2 = VPN2(vma);
+    int vpn1 = VPN1(vma);
+    int vpn0 = VPN0(vma);
+
+    // get top level root
+    struct pte *lvl_2_root = active_space_ptab();
+
+    // check if the pte we are accessing is valid ... if it is then
+    // we know we dont have perms to access it
+    struct pte pte2 = lvl_2_root[vpn2];
+    if (PTE_VALID(pte2))
+    {
+        // if we cant go further return (we are at end of gigapage)
+        if (PTE_LEAF(pte2)) return 0;
+
+        // checking root level 1 page table
+        struct pte *lvl_1_root = pageptr(pte2.ppn);
+        struct pte pte1 = lvl_1_root[vpn1];
+
+        //validity checks
+        if (PTE_VALID(pte1)) {
+            // if we cant go further return (we are at end of megapage)
+            if (PTE_LEAF(pte1)) return 0;
+
+            // checking root level 0 page table
+            struct pte *lvl_0_root = pageptr(pte1.ppn);
+            struct pte pte0 = lvl_0_root[vpn0];
+
+            if (PTE_VALID(pte0)) return 0;
+        };
+    }
+
+    // if we reach here we know we can allocate new mem now
+    void *pp = alloc_phys_page();
+    map_page(VMA(VPN(vma)), pp, PTE_R | PTE_W | PTE_U);
+
+    sfence_vma(); // flush tlb
+
+    return 1;
 }
 
 /**
