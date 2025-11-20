@@ -117,11 +117,11 @@ void handle_umode_exception(unsigned int cause, struct trap_frame* tfr) {
     if (name != NULL) {
         switch (cause) {
             case RISCV_SCAUSE_LOAD_PAGE_FAULT:
-                if (handle_umode_page_fault(tfr, csrr_stval())) return;
+                // if (handle_umode_page_fault(tfr, csrr_stval())) return;
             case RISCV_SCAUSE_STORE_PAGE_FAULT:
                 if (handle_umode_page_fault(tfr, csrr_stval())) return;
             case RISCV_SCAUSE_INSTR_PAGE_FAULT:
-                if (handle_umode_page_fault(tfr, csrr_stval())) return;
+                // if (handle_umode_page_fault(tfr, csrr_stval())) return;
             case RISCV_SCAUSE_LOAD_ADDR_MISALIGNED:
             case RISCV_SCAUSE_STORE_ADDR_MISALIGNED:
             case RISCV_SCAUSE_INSTR_ADDR_MISALIGNED:
