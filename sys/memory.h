@@ -137,7 +137,8 @@ extern void unmap_and_free_range(void* vp, size_t size);
  * @brief Checks that pointer is wellformed and pointer + len does not wrap around zero,
  * then iterates over pages in range, confirming the pages are mapped and have the passed
  * flags set.
- * @param vp Virtual memory address to start validation (must be a multiple of PAGE_SIZE)
+ * @param vp Virtual memory address to start validation ~~(must be a multiple of PAGE_SIZE)~~ does not necessarilly have to be, check errata
+ * [11/18 14:35] In memory.c the vp argument in the function validate_vptr does not have to be page aligned. It should validate arbitrary pointer.
  * @param len Size (in bytes) of range
  * @param rwxu_flags Flags to check pages in range for
  * @return 0 on success; error on malformed pointer, unmapped page, or mismatching flags
@@ -152,7 +153,7 @@ extern int validate_vptr(const void* vp, size_t len, int rwxu_flags);
  * @param ug_flags Flags to check pages
  * @return 0 on success; error on malformed pointer, unmapped page, or mismatching flags
  */
-extern int validate_vstr(const char* vs, int ug_flags);
+extern int validate_vstr(const char* vs, int rug_flags);
 
 /**
  * @brief Allocates a single new page using alloc_phys_pages().

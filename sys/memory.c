@@ -417,7 +417,10 @@ mtag_t clone_active_mspace(void) {
 */
 void reset_active_mspace(void) {
     // FIXME
-
+    // what this should do is just traverse our page tree and just calloc everything to zero??? This can easilly be done
+    // with like a dfs type thing but im not sure if there is anything else we have to clean up
+    // also how do we handle global pages do we have to keep the level page above that active then??
+    // deet was here hehehehehe
     return;
 }
 
@@ -631,7 +634,7 @@ void unmap_and_free_range(void *vp, size_t size) {
     return;
 }
 
-int validate_vptr(const void *vp, size_t len, int rwxug_flags) {
+int validate_vptr(const void *vp, size_t len, int rwxu_flags) {
     // FIXME
     return 0;
 }
@@ -662,7 +665,7 @@ void *alloc_phys_pages(unsigned int cnt) {
     if (cnt <= 0)
     {
         kprintf("ERROR: alloc_phys_pages: Count <= 0: Cnt: %d", cnt);
-        return;
+        return NULL;
     }
     // walk along chunk list
     struct page_chunk* head = free_chunk_list;
@@ -685,7 +688,7 @@ void *alloc_phys_pages(unsigned int cnt) {
         kprintf("No avaiable pages can be allocated fro cnt: %d", cnt);
 
         // shoudl panic here but idk how
-        return;
+        return NULL;
     }
     // otherwise head->next is not null and we found
     // actual start address

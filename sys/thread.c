@@ -89,7 +89,7 @@ struct thread {
     const char * name;
     struct thread_stack_anchor * stack_anchor;      //  base of every threads stack
     void * stack_lowest;                            // 
-    struct process * proc;                          // 
+    struct process * proc;                          // already here
     struct thread * parent;
     struct thread * list_next;
     struct condition * wait_cond;

@@ -67,7 +67,13 @@ static int sysuiodup(int oldfd, int newfd);
  * @return void
  */
 
-void handle_syscall(struct trap_frame *tfr) {}
+void handle_syscall(struct trap_frame *tfr) {
+    // since we called exception, we want to go to
+    // the next instruction
+    tfr->sepc += 4;
+    // return the result of the syscall
+    tfr->a0 = syscall(tfr);
+}
 
 // INTERNAL FUNCTION DEFINITIONS
 //
@@ -80,14 +86,52 @@ void handle_syscall(struct trap_frame *tfr) {}
  * @return result of syscall
  */
 
-int64_t syscall(const struct trap_frame *tfr) { return -ENOTSUP; }
+int64_t syscall(const struct trap_frame *tfr) {
+    switch (tfr->a7) {
+        case SYSCALL_EXIT:
+            return sysexit();
+        case SYSCALL_EXEC:
+            return sysexec((int)tfr->a0, (int)tfr->a1, (char **)tfr->a2);
+        case SYSCALL_FORK:
+            return sysfork(tfr);
+        case SYSCALL_WAIT:
+            return syswait((int)tfr->a0);
+        case SYSCALL_PRINT:
+            return sysprint((const char *)tfr->a0);
+        case SYSCALL_USLEEP:
+            return sysusleep((unsigned long)tfr->a0);
+        case SYSCALL_FSCREATE:
+            return sysfscreate((const char *)tfr->a0);
+        case SYSCALL_FSDELETE:
+            return sysfsdelete((const char *)tfr->a0);
+        case SYSCALL_OPEN:
+            return sysopen((int)tfr->a0, (const char *)tfr->a1);
+        case SYSCALL_CLOSE:
+            return sysclose((int)tfr->a0);
+        case SYSCALL_READ:
+            return sysread((int)tfr->a0, (void *)tfr->a1, (size_t)tfr->a2);
+        case SYSCALL_WRITE:
+            return syswrite((int)tfr->a0, (const void *)tfr->a1, (size_t)tfr->a2);
+        case SYSCALL_FCNTL:
+            return sysfcntl((int)tfr->a0, (int)tfr->a1, (void *)tfr->a2);
+        case SYSCALL_PIPE:
+            return syspipe((int *)tfr->a0, (int *)tfr->a1);
+        case SYSCALL_UIODUP:
+            return sysuiodup((int)tfr->a0, (int)tfr->a1);
+        default:
+            return -ENOTSUP;
+    }
+ }
 
 /**
  * @brief Calls process exit
  * @return void
  */
 
-int sysexit(void) { return 0; }
+int sysexit(void) { 
+    process_exit();
+    return 0; 
+}
 
 /**
  * @brief Executes new process given a executable and arguments
@@ -99,7 +143,17 @@ int sysexit(void) { return 0; }
  * @return result of process_exec, else -EBADFD on invalid file descriptors
  */
 
-int sysexec(int fd, int argc, char **argv) { return 0; }
+int sysexec(int fd, int argc, char **argv) {
+    // what to do here, check if file descriptor is valid
+    // check if current process is allowed to access file descriptor
+    // check if argc is valid wrt argv
+    // check if argv is in the space of the user
+
+    // call process exec
+    // if process exec returns that means the file was invalid
+    // return the error code
+    return 0;
+}
 
 /**
  * @brief Forks a new child process using process_fork
@@ -107,7 +161,10 @@ int sysexec(int fd, int argc, char **argv) { return 0; }
  * @return result of process_fork
  */
 
-int sysfork(const struct trap_frame *tfr) { return 0; }
+int sysfork(const struct trap_frame *tfr) {
+    //cp3
+    return 0;
+}
 
 /**
  * @brief Sleeps till a specified child process completes
@@ -116,7 +173,10 @@ int sysfork(const struct trap_frame *tfr) { return 0; }
  * @return result of thread_join else invalid on invalid thread id
  */
 
-int syswait(int tid) { return 0; }
+int syswait(int tid) { 
+    // cp3
+    return 0;
+}
 
 /**
  * @brief Prints to console via kprintf
@@ -126,7 +186,16 @@ int syswait(int tid) { return 0; }
  * @return 0 on sucess else error from validate_vstr
  */
 
-int sysprint(const char *msg) { return 0; }
+int sysprint(const char *msg) {
+    // check if string is valid vmem address
+    // print
+    int valid = validate_vstr(msg, PTE_U);
+    if (valid != 0) return valid; // return invalid reason
+   
+    //print
+    kprintf(msg);
+    return 0; 
+}
 
 /**
  * @brief Sleeps process till specificed amount of time has passed
@@ -137,7 +206,13 @@ int sysprint(const char *msg) { return 0; }
  * @return 0
  */
 
-int sysusleep(unsigned long us) { return 0; }
+int sysusleep(unsigned long us) {
+    // we dont have to do any checking here thankfully
+    struct alarm alarm;
+    alarm_init(&alarm, "sleep");
+    alarm_sleep_us(&alarm, us);
+    return 0;
+}
 
 /**
  * @brief Creates a new file in the filesystem specified by the path.
@@ -147,7 +222,30 @@ int sysusleep(unsigned long us) { return 0; }
  * @return 0 on success, negative error code if error on error.
  */
 
-int sysfscreate(const char *path) { return 0; }
+int sysfscreate(const char *path) {
+    // validate path
+    // parse the path
+    // call ktfs to create the file
+    int valid = validate_vstr(path, PTE_U);
+    if (valid != 0) return valid;
+    
+    char *mpnameptr;
+    char *flnameptr;
+    
+    valid = parse_path(path, &mpnameptr, &flnameptr);
+    if (valid != 0){
+        kfree(mpnameptr);
+        kfree(flnameptr);
+        return valid;
+    }
+
+    valid = create_file(mpnameptr, flnameptr);
+
+    kfree(mpnameptr);
+    kfree(flnameptr);
+
+    return valid;
+}
 
 /**
  * @brief Deletes a file in the filesystem specified by the path.
@@ -157,7 +255,30 @@ int sysfscreate(const char *path) { return 0; }
  * @return 0 on success, negative error code if error on error.
  */
 
-int sysfsdelete(const char *path) { return 0; }
+int sysfsdelete(const char *path) {
+    // validate path
+    // parse the path
+    // call ktfs to delete the file
+    int valid = validate_vstr(path, PTE_U);
+    if (valid != 0) return valid;
+    
+    char *mpnameptr;
+    char *flnameptr;
+    
+    valid = parse_path(path, &mpnameptr, &flnameptr);
+    if (valid != 0){
+        kfree(mpnameptr);
+        kfree(flnameptr);
+        return valid;
+    }
+
+    valid = delete_file(mpnameptr, flnameptr);
+
+    kfree(mpnameptr);
+    kfree(flnameptr);
+
+    return valid;
+}
 
 /**
  * @brief Opens a file or device of specified fd for given process

@@ -89,6 +89,151 @@ _smode_trap_entry:
         csrrw   sp, sscratch, sp
         beqz    sp, smode_trap_entry_from_smode
 smode_trap_entry_from_umode:
+# what are the differences from s_mode?
+# we have to load a diff sp from sscratch
+# we have to restore gp and tp from the thread stack anchor
+
+        ## we can copy all this directly from s_mode
+        addi    sp, sp, -TFRSZ          # Allocate trap frame
+
+        # Save general purpose registers to trap frame
+
+        sd      a0, A0(sp)
+        sd      a1, A1(sp)
+        sd      a2, A2(sp)
+        sd      a3, A3(sp)
+        sd      a4, A4(sp)
+        sd      a5, A5(sp)
+        sd      a6, A6(sp)
+        sd      a7, A7(sp)
+        sd      t0, T0(sp)
+        sd      t1, T1(sp)
+        sd      t2, T2(sp)
+        sd      t3, T3(sp)
+        sd      t4, T4(sp)
+        sd      t5, T5(sp)
+        sd      t6, T6(sp)
+        sd      s1, S1(sp)
+        sd      s2, S2(sp)
+        sd      s3, S3(sp)
+        sd      s4, S4(sp)
+        sd      s5, S5(sp)
+        sd      s6, S6(sp)
+        sd      s7, S7(sp)
+        sd      s8, S8(sp)
+        sd      s9, S9(sp)
+        sd      s10, S10(sp)
+        sd      s11, S11(sp)
+        sd      ra, RA(sp)
+        sd      fp, FP(sp)
+
+        # Capture retired instruction counter and save it in trap frame
+
+        rdinstret       t6
+        sd              t6, SINSTRET(sp)
+
+        # Save sstatus and sepc CSRs
+
+        csrr    t6, sstatus
+        sd      t6, SSTATUS(sp)
+        csrr    t6, sepc
+        sd      t6, SEPC(sp)
+
+        # Set up _fp_ to look like a normal stack frame
+
+        addi    fp, sp, TFRSZ
+
+        # OUR EDITS
+        # CHANGE: save gp and tp
+        sd      gp, GP(sp)
+        sd      tp, TP(sp)
+
+        # load the right tp and gp from the thread
+        # this is in the kernel stack
+        ld      tp, TFRSZ+KTP(sp)
+        ld      gp, TFRSZ+KGP(sp)
+
+        # from here on is the same as s_mode
+
+        # Set up _ra_ to return from exception and interrupt handlers to next
+        # instruction after call
+
+        call    smode_trap_entry_from_umode_cont
+
+        # S mode handlers return here because the call instruction above places
+        # this address in _ra_ before we jump to an exception or trap handler.
+        # Restore all GPRs except _gp_ and _tp_ (not saved/restored in S mode),
+        # _sp_ (restored last) and _t6_ (used as temporary).
+        
+        ld      a0, A0(sp)
+        ld      a1, A1(sp)
+        ld      a2, A2(sp)
+        ld      a3, A3(sp)
+        ld      a4, A4(sp)
+        ld      a5, A5(sp)
+        ld      a6, A6(sp)
+        ld      a7, A7(sp)
+        ld      t0, T0(sp)
+        ld      t1, T1(sp)
+        ld      t2, T2(sp)
+        ld      t3, T3(sp)
+        ld      t4, T4(sp)
+        ld      t5, T5(sp)
+        ld      s1, S1(sp)
+        ld      s2, S2(sp)
+        ld      s3, S3(sp)
+        ld      s4, S4(sp)
+        ld      s5, S5(sp)
+        ld      s6, S6(sp)
+        ld      s7, S7(sp)
+        ld      s8, S8(sp)
+        ld      s9, S9(sp)
+        ld      s10, S10(sp)
+        ld      s11, S11(sp)
+        ld      ra, RA(sp)
+        ld      fp, FP(sp)
+
+        ## OUR EDITS
+        ## CHANGE: restore gp and tp
+        ld      gp, GP(sp)
+        ld      tp, TP(sp)
+
+
+        # We need interrupts disabled after restoring _sepc_ so that it does not
+        # get clobbered by another trap entry. Restore _sstatus_ first, which
+        # automatically disables interrupts.
+
+        ld      t6, SSTATUS(sp)
+        csrw    sstatus, t6
+        ld      t6, SEPC(sp)
+        csrw    sepc, t6
+
+        # Restore _t6_ and _sp_ last
+
+        ld      t6, T6(sp)
+        addi    sp, sp, TFRSZ
+
+        # OUR EDITS
+        #CHANGE: WE NEED TO RESTOR SP
+        csrrw  sp, sscratch, sp      # Restore user SP from sscratch
+
+        sret    # done!
+
+
+        # Execution of trap entry continues here from `call smode_trap_entry_from_umode_cont` above. Jump to
+        # exception handler or interrupt handler depending on what brought us
+        # here. Note that we clear the most significant bit of _scause_ before
+        # passing its value to the interrupt handler.
+
+smode_trap_entry_from_umode_cont:      csrr    a0, scause      # a0 contains "exception code"
+        mv      a1, sp          # a1 contains trap frame pointer
+        
+        bgez    a0, handle_umode_exception # in excp.c
+        
+        slli    a0, a0, 1       # clear msb
+        srli    a0, a0, 1       #
+
+        j       handle_umode_interrupt # in intr.c
 
 smode_trap_entry_from_smode:
 

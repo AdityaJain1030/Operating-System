@@ -7,6 +7,9 @@
 #include "filesys.h"
 
 #include <stddef.h>
+#include <stdint.h>
+// #include <stdlib.h>
+#include <string.h>
 
 #include "error.h"
 #include "fsimpl.h"
@@ -303,12 +306,48 @@ void nullfs_flush(struct filesystem* fs __attribute__((unused))) {
 
 /**
  * @brief Parses a path into mount point name and file name
- * @param path string to be parsed
+ * @param path string to be parsed. This function should not modify this path
  * @param mpnameptr pointer to which the mount point name will be stored
  * @param flnameptr pointer to which the file name will be stored
  * @return 0 on success, -EINVAL on invalid arguments.
  */
-int parse_path(char* path, char** mpnameptr, char** flnameptr) {
+int parse_path(const char* path, char** mpnameptr, char** flnameptr) {
     // FIXME
-    return -ENOTSUP;
+    if (path == NULL) return -EINVAL;
+    if (mpnameptr == NULL) return -EINVAL;
+    if (flnameptr == NULL) return -EINVAL;
+
+    char *dash = strchr(path, '/');
+
+    if (dash == NULL)
+    {
+        // this means our whole string is the path
+        // we do not want to worry about invalid
+        // nonexistent paths here that is the file
+        // systems job
+
+        // *mpnameptr = path; // this is a bit cooked
+        // ok that was giving me a warning lets just strcpy
+        int path_len = strlen(path);
+        *mpnameptr = kmalloc(path_len);
+        strncpy(*mpnameptr, path, path_len);
+        return 0;
+    }
+    // split at the first /, all subsequent dashes are assumed to be
+    // part at file name
+    void *mpnamestart = (void*) path;
+    void *flnamestart = (void*)((uintptr_t)dash + 1);
+
+    unsigned long mpname_len = (uintptr_t) dash;
+    unsigned long flname_len = (uintptr_t)path - (uintptr_t)dash;
+
+    *mpnameptr = kmalloc(mpname_len + 1); // add null terminator
+    *flnameptr = kmalloc(flname_len);
+
+    strncpy(*mpnameptr, mpnamestart, mpname_len);
+    (*mpnameptr)[mpname_len] = '\0'; // add null terminator
+
+    strncpy(*flnameptr, flnamestart, flname_len);
+    
+    return 0;
 }

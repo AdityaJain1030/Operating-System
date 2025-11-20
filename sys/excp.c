@@ -14,6 +14,7 @@
 #include "string.h"
 #include "thread.h"
 #include "trap.h"
+#include "process.h"
 
 // EXPORTED FUNCTION DECLARATIONS
 //
@@ -103,4 +104,40 @@ void handle_smode_exception(unsigned int cause, struct trap_frame* tfr) {
  * @param tfr Trap frame pointer
  * @return None
  */
-void handle_umode_exception(unsigned int cause, struct trap_frame* tfr) { return; }
+void handle_umode_exception(unsigned int cause, struct trap_frame* tfr) { 
+    // FIXME, this has to support lazy alloc
+
+    //adding ucall support for 11/19 autograder
+        const char* name = NULL;
+    char msgbuf[80];
+
+    if (0 <= cause && cause < sizeof(excp_names) / sizeof(excp_names[0])) name = excp_names[cause];
+
+    if (name != NULL) {
+        switch (cause) {
+            case RISCV_SCAUSE_LOAD_PAGE_FAULT:
+                // handle_umode_page_fault(tfr, );
+            case RISCV_SCAUSE_STORE_PAGE_FAULT:
+            case RISCV_SCAUSE_INSTR_PAGE_FAULT:
+            case RISCV_SCAUSE_LOAD_ADDR_MISALIGNED:
+            case RISCV_SCAUSE_STORE_ADDR_MISALIGNED:
+            case RISCV_SCAUSE_INSTR_ADDR_MISALIGNED:
+            case RISCV_SCAUSE_LOAD_ACCESS_FAULT:
+            case RISCV_SCAUSE_STORE_ACCESS_FAULT:
+            case RISCV_SCAUSE_ECALL_FROM_UMODE:
+                handle_syscall(tfr);
+                return;
+            case RISCV_SCAUSE_INSTR_ACCESS_FAULT:
+                snprintf(msgbuf, sizeof(msgbuf), "%s at %p for %p in S mode", name,
+                         (void*)tfr->sepc, (void*)csrr_stval());
+                break;
+            default:
+                snprintf(msgbuf, sizeof(msgbuf), "%s at %p in S mode", name, (void*)tfr->sepc);
+        }
+    } else {
+        snprintf(msgbuf, sizeof(msgbuf), "Exception %d at %p in S mode", cause, (void*)tfr->sepc);
+    }
+
+    process_exit();
+    return;
+}

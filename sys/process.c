@@ -8,6 +8,7 @@
 /*!
  * @brief Enables trace messages for process.c
  */
+#include <stdint.h>
 #ifdef PROCESS_TRACE
 #define TRACE
 #endif
@@ -81,11 +82,81 @@ void procmgr_init(void) {
 
 int process_exec(struct uio* exefile, int argc, char** argv) {
     // FIXME
+    // todo
+    // how this works
+    // 1. load an elf
+    // 2. create new page
+    // 3. load arguements onto new page
+    // 4. create stack on page
+    // 5. clear out old page
+    // 6. set SPP (and SPIE almost forgot)
+    // 7. call trap jump with pointers to argc argv
+    
+    void (*entry_ptr)(); // taken from main i need to learn how elf works still.....
+    // 1. load an elf
+    int err = elf_load(exefile, &entry_ptr);
+    uio_close(exefile); 
+    if (err < 0) return err;
+
+    // 2. create new page
+    void* newpage = alloc_phys_page();
+
+    // 3. load arguements onto new page
+    // 4. create stack on page
+    int stack_sz = build_stack(newpage, argc, argv);
+
+    // loook at slides 21
+    // 5. clear out old page, i dont think we can access anything not in our stack now
+    reset_active_mspace();
+
+    // we have to still make the stack discoverable
+    // this maps to the last possible address. Its a little weird but this is the layout
+    // |      ...     |
+    // |              |
+    // |              |
+    // |              |
+    // |              |  going up in memory means we may not be contigious in stack anymore
+    // |              |
+    // |              |
+    // |______________|
+    // |    OUR PAGE  | (page_addr)  oxFFFF0000
+    // |              |
+    // |              |
+    // |              |
+    // |              |
+    // |stacky stack  | (sp) SP GROWS BY DECREMENTING!!!
+    // |--------------|
+    // |   argc/argv  |
+    // |______________| (UMEM_END_VMA) 0xFFFFFFFFFF
+    uintptr_t page_addr = UMEM_END_VMA - PAGE_SIZE;
+    map_page(page_addr, newpage, PTE_R | PTE_W); // removing X ~~dont think we need X but ill keep it~~ 
+
+    // 6. set SPP (and SPIE almost forgot)
+    // csrs_sstatus(RISCV_SSTATUS_SPIE | RISCV_SSTATUS_SPP); // this is wrong
+    // trap frame swaps out sstatus with its own, we should just set the trapframe sstatus
+    struct trap_frame *trap = kcalloc(sizeof (struct trap_frame), 1);
+    trap->sstatus = csrr_sstatus();
+    trap->sstatus &= ~RISCV_SSTATUS_SPP;
+    trap->sstatus |= RISCV_SSTATUS_SPIE;
+
+    // set the rest of the trap frame as well
+    trap->sp = (void *)(UMEM_END_VMA - stack_sz); // hope this is the right address
+    trap->a0 = (long)argc; // ?? this should point to argc location
+    trap->a1 = UMEM_END_VMA - stack_sz; // this should point to argv loc, Im pretty sure this is same as sp, but one goes up one goes down
+
+    // 7. call trap jump with pointers to trap frame and sscratch
+    void* kernel_stack = running_thread_stack_base();
+    trap_frame_jump(trap, kernel_stack); // dunno what to set sscratch to yet
+
+    // how do we free the trap frame??? 
+
     return 0;
 }
 
 int process_fork(const struct trap_frame* tfr) {
     // FIXME
+
+    // dont deal with this till cp3
     return 0;
 }
 
@@ -98,6 +169,22 @@ int process_fork(const struct trap_frame* tfr) {
  */
 void process_exit(void) {
     // FIXME
+    // 1. clear process memory space
+    // 2. for each of the uio interfaces the process owns close them if they are open
+    // 3. call running_thread_suspend
+    struct process* proc = current_process();
+
+    for (int i = 0; i < PROCESS_UIOMAX; i++) {
+        if (proc->uiotab[i] != NULL) {
+            uio_close(proc->uiotab[i]);
+            proc->uiotab[i] = NULL;
+        }
+    }
+
+    discard_active_mspace();
+
+    thread_set_process(proc->tid, NULL);
+    running_thread_exit();
 }
 
 // INTERNAL FUNCTION DEFINITIONS
@@ -179,6 +266,7 @@ int build_stack(void* stack, int argc, char** argv) {
  * \param[in] tfr   Pointer to a trap frame
  *
  * \return NONE (very important, this is a hint)
+ * Im guessing ^^ above hint means brother we never coming baack
  */
 void fork_func(struct condition* done, struct trap_frame* tfr) {
     // FIXME
