@@ -398,8 +398,9 @@ void reset_active_mspace(void) {
     for (int i = 0; i < PTE_CNT; i++)
     {
         struct pte pte2 = lvl_2_root[i];
-        if (PTE_GLOBAL(pte2)) continue;
-        if (!PTE_VALID(pte2)) continue;
+        if (PTE_GLOBAL(pte2)) continue; // skip globals
+        if (!PTE_VALID(pte2)) continue; // already freed
+        // we are at a valid gigapage
         if (PTE_LEAF(pte2) && PTE_VALID(pte2)) {
             // free gigapage, not sure how to do this
             // free_phys_pages() ???
@@ -408,25 +409,30 @@ void reset_active_mspace(void) {
             lvl_2_root[i] = null_pte();
             continue;
         }
+
+        // get 1 level root
         struct pte *lvl_1_root = pageptr(pte2.ppn);
-        int lvl_1_cnt = 0;
+        
+        // free all the things in level 1 that we can
+        int lvl_1_freed_cnt = 0;
         for (int j = 0; j < PTE_CNT; j++)
         {
             struct pte pte1 = lvl_1_root[j];
 
             // check global or already invalid
-            if (PTE_GLOBAL(pte1)) continue;
+            if (PTE_GLOBAL(pte1)) continue; // skip global
             if (!PTE_VALID(pte1)) {
-                lvl_1_cnt += 1;
+                lvl_1_freed_cnt += 1;
                 continue;
             }
+            // we are at a valid megapage
             if (PTE_LEAF(pte1) && PTE_VALID(pte1)) {
                 // free megapage, not sure how to do this
                 // free_phys_pages() ???
 
                 // replace pte with null pte
                 lvl_1_root[j] = null_pte();
-                lvl_1_cnt += 1;
+                lvl_1_freed_cnt += 1;
                 continue;
             }
 
@@ -434,31 +440,44 @@ void reset_active_mspace(void) {
             struct pte *lvl_0_root = pageptr(pte1.ppn);
             
             // free all the things in level 0 that we can
-            int lvl_0_cnt = 0;
+            int lvl_0_freed_cnt = 0;
             for (int k = 0; k < PTE_CNT; k++)
             {
                 struct pte pte0 = lvl_0_root[k];
-                if (PTE_GLOBAL(pte0)) continue;
+                if (PTE_GLOBAL(pte0)) continue; // skip global
+
+                // free all valid pages
                 if (PTE_VALID(pte0)) {
                     free_phys_page(pageptr(pte0.ppn));
                     // replace pte with null pte
                     lvl_0_root[k] = null_pte();
                 }
-                lvl_0_cnt += 1;
+                lvl_0_freed_cnt += 1;
             }
 
-            // if we freed all of the previous level we
-            // can delete this connection as well
-            if (lvl_0_cnt == PTE_CNT)
+            // if we freed all things on the page table (no globls) we
+            // can free the page table as well
+            if (lvl_0_freed_cnt == PTE_CNT)
             {
-                lvl_1_cnt += 1;
+                // set its parent pte to null
                 lvl_1_root[j] = null_pte();
+
+                // free page table
                 free_phys_page(lvl_0_root);
+            
+                // we cleared one of the lvl_1_roots children
+                // so we should increase count
+                lvl_1_freed_cnt += 1;
             }
         }
-        if (lvl_1_cnt == PTE_CNT)
+        // we freed all of this page tables children
+        // we can free this page table now
+        if (lvl_1_freed_cnt == PTE_CNT)
         {
+            // set its parent pte to null
             lvl_2_root[i] = null_pte();
+
+            // free page table
             free_phys_page(lvl_1_root);
         }
     }
