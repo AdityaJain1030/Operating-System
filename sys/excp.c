@@ -5,6 +5,7 @@
 */
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include "console.h"
 #include "intr.h"
@@ -108,7 +109,7 @@ void handle_umode_exception(unsigned int cause, struct trap_frame* tfr) {
     // FIXME, this has to support lazy alloc
 
     //adding ucall support for 11/19 autograder
-        const char* name = NULL;
+    const char* name = NULL;
     char msgbuf[80];
 
     if (0 <= cause && cause < sizeof(excp_names) / sizeof(excp_names[0])) name = excp_names[cause];
@@ -116,9 +117,11 @@ void handle_umode_exception(unsigned int cause, struct trap_frame* tfr) {
     if (name != NULL) {
         switch (cause) {
             case RISCV_SCAUSE_LOAD_PAGE_FAULT:
-                // handle_umode_page_fault(tfr, );
+                if (handle_umode_page_fault(tfr, csrr_stval())) return;
             case RISCV_SCAUSE_STORE_PAGE_FAULT:
+                if (handle_umode_page_fault(tfr, csrr_stval())) return;
             case RISCV_SCAUSE_INSTR_PAGE_FAULT:
+                if (handle_umode_page_fault(tfr, csrr_stval())) return;
             case RISCV_SCAUSE_LOAD_ADDR_MISALIGNED:
             case RISCV_SCAUSE_STORE_ADDR_MISALIGNED:
             case RISCV_SCAUSE_INSTR_ADDR_MISALIGNED:
@@ -137,6 +140,8 @@ void handle_umode_exception(unsigned int cause, struct trap_frame* tfr) {
     } else {
         snprintf(msgbuf, sizeof(msgbuf), "Exception %d at %p in S mode", cause, (void*)tfr->sepc);
     }
+    
+    kprintf("%s\n", msgbuf);
 
     process_exit();
     return;
