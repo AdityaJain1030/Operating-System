@@ -78,25 +78,22 @@ char memory_initialized = 0;
 // are in a single large chunk. To allocate a block of pages, we break up the
 // smallest chunk on the list.
 
+// -Goals/Idea: Free list of page chunks should be sorted by physical addresses so that way when freeing it is easy to merge
+
+//tracks physical pages I believe?
+
 /**
  * @brief Section of consecutive physical pages. We keep free physical pages in a
  * linked list of chunks. Initially, all free pages are in a single large chunk. To
  * allocate a block of pages, we break up the smallest chunk in the list
  */
-/*
--Goals/Idea: Free list of page chunks should be sorted by physical addresses so that way when freeing it is easy to merge
-
-
-tracks physical pages I believe?
-
-
-
-*/
 struct page_chunk {
     struct page_chunk *next;  ///< Next page in list
     unsigned long pagecnt;    ///< Number of pages in chunk
     //uint64_t      address;      // start address of page_chunk removed?
 };
+
+
 
 /**
  * @brief RISC-V PTE. RTDC (RISC-V docs) for what each of these fields means!
@@ -119,44 +116,22 @@ struct pte {
     uint64_t n : 1;
 };
 
-/*
+// STUFF TO KNOW! RISC V 12.3-4 PRIVILEGED
+// - ASID: Address Space Identifer: see 4.11?? Not sure slides are uncleaer :/
 
+// - SATP Register
+//     - SATP[43:0]: Holds PPN of root page table (so physical address divide by 4096) So to find address multiply by 4 * 1024
+//     - So upper 20 cleared and we can get address by doing (SATP << 20) >> 20 and then taking that result adn doing << 12
+// - Leaf versus non-leaf PTE:
+//     - Leaf PTE: PPN field gives teh physical page number to the actual physical memor py page. I.e. paddr = (PPN << 12) | page_offset
+//         - When oen of R | W | X = 1
+//     - Non-leaf PTE: Gives phsycial page number of ANOTHER page table
+//         - Page tables are stored in RAM!!!!!!!!!!
+//         - Look at teh R, W, X bits. Shoudl all be 0
 
-STUFF TO KNOW! RISC V 12.3-4 PRIVILEGED
-- ASID: Address Space Identifer: see 4.11?? Not sure slides are uncleaer :/
-
-- SATP Register
-    - SATP[43:0]: Holds PPN of root page table (so physical address divide by 4096) So to find address multiply by 4 * 1024
-    - So upper 20 cleared and we can get address by doing (SATP << 20) >> 20 and then taking that result adn doing << 12
-- Leaf versus non-leaf PTE:
-    - Leaf PTE: PPN field gives teh physical page number to the actual physical memor py page. I.e. paddr = (PPN << 12) | page_offset
-        - When oen of R | W | X = 1
-    - Non-leaf PTE: Gives phsycial page number of ANOTHER page table
-        - Page tables are stored in RAM!!!!!!!!!!
-        - Look at teh R, W, X bits. Shoudl all be 0
-
-- Bits 63-39 fetch and store addresses must equal to bit 38 otherwis page-fault exception!
-- However final mapped physical address IS zero extended??
-- 
-
-
-
-
-
-
-
-
-*/
-
-
-
-
-
-
-
-
-
-
+// - Bits 63-39 fetch and store addresses must equal to bit 38 otherwis page-fault exception!
+// - However final mapped physical address IS zero extended??
+// - 
 
 // INTERNAL MACRO DEFINITIONS
 //
@@ -335,7 +310,6 @@ void memory_init(void) {
         use kimg_end = kernel image end which is teh stsart of our thing
     */
 
-
     // free_chunk_list = new
     // old way of using kmalloc. Instead we directly embed!!!! However, maybe we still allocate a sentinel in case?
     //struct page_chunk* head = kmalloc(sizeof(struct page_chunk));  // create the initial page chunk which holds from end of kernel image to end of RAM
@@ -343,7 +317,6 @@ void memory_init(void) {
     /*
         In supervisor/kernel mode we have ALREADY mapped the stuff!!! in the levl 1 subtbale and thast fine!! 
         so we can directly assign 
-    
     */
 
 
@@ -414,11 +387,8 @@ mtag_t clone_active_mspace(void) {
     return (mtag_t)0;
 }
 
-
-
 /*
     Unmaps and frees all non-global pages from the active memory space.
-
     Returns: None
 */
 void reset_active_mspace(void) {
@@ -434,7 +404,6 @@ void reset_active_mspace(void) {
 
 /*
     Switches memory spaces to main, unmaps and frees all non-global pages from the previously active memory space.
-
     Returns: Tag corresponding to main memory space  
 */
 mtag_t discard_active_mspace(void) {
@@ -553,10 +522,6 @@ void *map_page(uintptr_t vma, void *pp, int rwxug_flags) {
 
     return (void *) vma;
 
-
-
-
-
 //     //struct pte* pt2_pte = &main_pt2[VPN2(vma)];
 //     struct pte* pt1_pte;
 //     struct pte* pt0_pte;
@@ -634,10 +599,6 @@ void set_range_flags(const void *vp, size_t size, int rwxug_flags) {
 
 void unmap_and_free_range(void *vp, size_t size) {
     // FIXME
-    /*
-    
-    
-    */
     return;
 }
 
@@ -650,11 +611,8 @@ int validate_vstr(const char *vs, int rug_flags) {
     // FIXME
     return 0;
 }
-/*
 
-Allocating physicla pages := removing from chunk list??
-
-*/
+// Allocating physicla pages := removing from chunk list??
 
 void *alloc_phys_page(void) {
     // FIXME
@@ -693,7 +651,6 @@ void *alloc_phys_pages(unsigned int cnt) {
     if (actual_chunk == NULL)
     {
         kprintf("No avaiable pages can be allocated fro cnt: %d", cnt);
-
         // shoudl panic here but idk how
         panic("alloc_phys_pages panic. No available physical pages can be allocated");
         return NULL;
