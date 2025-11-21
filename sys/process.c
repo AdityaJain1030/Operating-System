@@ -167,6 +167,7 @@ int process_exec(struct uio* exefile, int argc, char** argv) {
     trap->sp = (void *)(UMEM_END_VMA - stack_sz); // hope this is the right address
     trap->a0 = (long)argc; // ?? this should point to argc location
     trap->a1 = UMEM_END_VMA - stack_sz; // this should point to argv loc, Im pretty sure this is same as sp, but one goes up one goes down
+    trap->sepc = entry_ptr;
 
     // 7. call trap jump with pointers to trap frame and sscratch
     void* kernel_stack = running_thread_stack_base();
