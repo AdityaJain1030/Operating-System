@@ -518,39 +518,17 @@ mtag_t discard_active_mspace(void) {
 void *map_page(uintptr_t vma, void *pp, int rwxug_flags) {
     // FIXME
     // return phsycial pointer as actual address?
-    /*
-        NEED TO EXPLCIILTY TELL CPU THAT TRANSALTION HAS CHANEGD! CPU DOES NOT KNOW THIS
-        USE A TLB FLUSH!!!!!!! CLEAR THE TLB!
-        Use SFENCE.VMA!!!!!!
-            - Allows us to specify specific entries and etc
-            - Could have different ASID for each address space. So essneitaly we specify teh ASID in the SFENCE.VMA and then correpsodning ASID table
-                entries will be flushed!
-            - Look at lecture 10/30 Timestampe: 54:29
-                - specify rs1 = rs2 = x0: Full flush
-
-        DO NOT FORGET TO FLUSHHHHHHHHHHHHHHHHHHHHHHHHHHHh!!!!!!!!
-        CPU may cahce PTE wehre V = 0. SO MAKE SURE YOU FLUSH EVEN IF YOU ARE ADDING ENTRIES
-
-        syntax: asm volatile ("sfence.vma" ::: "memory");
-
-        IN MAP PAGE: JUS USE THE LEVEL 1 SUBTABLE!!!!!! As we have R, W, X SO it is dieclty a LEAF!
-
-        CP2: Pretty sure that we just use the given L1 table and then allocate leaf node. BUT NO ONE IS ANSWERING MY FRICIKING QUESTION IN DISCROD
-        I AM TALKING TO MYSELF MAN. 
-
-        Don't forget to set the RWX U G flags!
-
-        I believe we can only map_page in Supervisor Mode!
-
-        Possible edge cases:
-            - 
-    */
 
     /*
         General algorithm for mapping:
         Take vma: Go to PT2 get PT2 entry. PTE2 points to PT1 substable. Check valid bits. If valid
         we go down sub level. If not valid, we need to allocate a new page
     */
+
+    // I why do we care if a vma is unaligned surely this is not the
+    // right thing to care about??
+    // I will keep it in here anyway because we will know if its expected
+    // from the ag panic message
     if (vma & (PAGE_SIZE - 1))  // trick to see if its algiend or not. If its not aligend what do we do?
     {
         // do something not sure yet
@@ -558,9 +536,22 @@ void *map_page(uintptr_t vma, void *pp, int rwxug_flags) {
         panic("mapping virtual address, virtual address is NOT page aligned!");
     }
 
+    
+    if (vma <= 0xC0000000)
+    {
+        panic("mapping to kernel, we should not do this");
+        // directly accessed using ppn. Technically we should not be remapping kernel. Please error here
+    }
+    // WE ARE IN USER SPACE
 
-    uintptr_t   pt2_pma = (csrr_satp() << 20) >> 8;
-    struct pte*  pt2 = (struct pte*)pt2_pma;
+
+    // brother what is this use the macros
+
+    // uintptr_t   pt2_pma = (csrr_satp() << 20) >> 8;
+    // struct pte*  pt2 = (struct pte*)pt2_pma;
+
+    //deet impl, using functions to make it more readable
+    struct pte* pt2 = active_space_ptab();
     // uintptr_t   pt1_ppn = pt2[VPN2(vma)].ppn;
     // uintptr_t pt1_pma = pt1_ppn << 12;
     // struct pte* pt1 = (struct pte*) pt1_pma;
@@ -574,84 +565,45 @@ void *map_page(uintptr_t vma, void *pp, int rwxug_flags) {
     uintptr_t pt0_ppn = pt1[VPN1(vma)].ppn;
     uintptr_t pt0_pma = pt0_ppn << 12;
     struct pte* pt0 = (struct pte*) pt0_pma;
-    // check if valid first
 
+    // check if invalid first
+    if (!PTE_VALID(pt2[VPN2(vma)]))
+    {
+        void* newpage = alloc_phys_page();
+        
+        // forgot which part does page cleaning (cleanup or setup)
+        // so for good measure we do it here
+        memset(newpage, 0, PAGE_SIZE);
 
-    if (PTE_VALID(pt2[VPN2(vma)]))
-    {
-        pt1_ppn = pt2[VPN2(vma)].ppn;
-        pt1_pma = pt1_ppn << 12;
-        pt1 = (struct pte*) pt1_pma;
+        // connect to root page
+        pt2[VPN2(vma)] = ptab_pte((struct pte*)newpage, 0);
     }
-    else
-    {
-        // allocate a new page
-    }
+    
+    // get the next level
+    pt1_ppn = pt2[VPN2(vma)].ppn;
+    pt1_pma = pt1_ppn << 12;
+    pt1 = (struct pte*) pt1_pma;
+
     if (!PTE_VALID(pt1[VPN1(vma)]))  // check if entry in page table 1 is valid (page exists for it i.e. subable 0 exists, otherwise allcoate)
     {
         uintptr_t temp = (uintptr_t) alloc_phys_page(); // allocates one page. Temp is pointer to start of that page which will be our l0 subtablw
+        
+        // forgot which part does page cleaning (cleanup or setup)
+        // so for good measure we do it here
+        memset((void *)temp, 0, PAGE_SIZE);
+
         pt1[VPN1(vma)] = ptab_pte((struct pte*) temp, PTE_G & rwxug_flags);        // sets/creates it
     }
+
     pt0_ppn = pt1[VPN1(vma)].ppn;
     pt0_pma = pt0_ppn << 12;
     pt0 = (struct pte*) pt0_pma;
 
-    if (vma <= 0xC0000000)
-    {
-        // directly accessed using ppn. Technically we should not be remapping kernel. Please error here
-    }
-    // greater than that its in user space
     pt0[VPN0(vma)] = leaf_pte(pp, rwxug_flags);
 
+    sfence_vma();
+
     return (void *) vma;
-
-//     //struct pte* pt2_pte = &main_pt2[VPN2(vma)];
-//     struct pte* pt1_pte;
-//     struct pte* pt0_pte;
-//     // check if root entry is valid
-//     if (PTE_VALID(*pt2_pte))
-//     {
-//         pt1_pte = (struct pte*) VPN(pt2_pte->ppn);
-//     }
-//     else
-//     {
-//         // exception???
-//         // for cp2 probably excpetion??
-//     }
-//     if (PTE_VALID(*pt1_pte))
-//     {
-//         pt0_pte = (struct pte*) VPN(pt1_pte->ppn);
-//     }
-//     else
-//     {
-        
-//         // exception???
-//         // if not valid... then we need to set it valid
-//     }
-//     /*
-//         struct pte {
-//         uint64_t flags : 8;
-//         uint64_t rsw : 2;
-//         uint64_t ppn : 44;                      // 
-//         uint64_t reserved : 7;                  //
-//         uint64_t pbmt : 2;                      //
-//         uint64_t n : 1;
-// };
-    
-//     */
-//     if (PTE_VALID(*pt0_pte))
-//     {
-//         pt0_pte->flags = rwxug_flags | PTE_V;
-//         //pt0_pte->rsw  free for kernel to use
-//         pt0_pte->ppn = VPN((uintptr_t) pp); 
-//     }
-//     else
-//     {
-//         // exception???
-//     }
-
-
-//     return (void*) vma;
 }
 
 void *map_range(uintptr_t vma, size_t size, void *pp, int rwxug_flags) {
