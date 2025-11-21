@@ -319,6 +319,7 @@ int parse_path(const char* path, char** mpnameptr, char** flnameptr) {
 
     char *dash = strchr(path, '/');
 
+    int path_len = strlen(path);
     if (dash == NULL)
     {
         // this means our whole string is the path
@@ -328,7 +329,6 @@ int parse_path(const char* path, char** mpnameptr, char** flnameptr) {
 
         // *mpnameptr = path; // this is a bit cooked
         // ok that was giving me a warning lets just strcpy
-        int path_len = strlen(path);
         *mpnameptr = kmalloc(path_len);
         strncpy(*mpnameptr, path, path_len);
         return 0;
@@ -338,8 +338,8 @@ int parse_path(const char* path, char** mpnameptr, char** flnameptr) {
     void *mpnamestart = (void*) path;
     void *flnamestart = (void*)((uintptr_t)dash + 1);
 
-    unsigned long mpname_len = (uintptr_t) dash;
-    unsigned long flname_len = (uintptr_t)path - (uintptr_t)dash;
+    unsigned long mpname_len = (uintptr_t) dash - (uintptr_t) path;
+    unsigned long flname_len = path_len - mpname_len;
 
     *mpnameptr = kmalloc(mpname_len + 1); // add null terminator
     *flnameptr = kmalloc(flname_len);
