@@ -159,12 +159,11 @@ int ktfs_free_inode_slot(struct cache* cache, uint32_t inode_slot_num){
 * @ ANOTHER NOTE TO CALLER: MAKE SURE THE ROOT DIRECTORY INODE IS DYNAMICALLY ALLOCATED ATLEAST FOR THE DURATION OF THIS FUNCTION! I DO NOT WANT THAT SHIT ON THE STACK
 */
 int ktfs_appender(struct cache* cache, struct ktfs_inode* inode, void * buf, int bytecnt, int op){ 
-    kprintf("%s(cache=%p, inode=%p, bytecnt=%u)\n", __func__, cache, inode, bytecnt);
+    trace("%s(cache=%p, inode=%p, bytecnt=%u)\n", __func__, cache, inode, bytecnt);
     struct ktfs_file * file_wrapper;
     uint32_t * pos;
     uint16_t inode_num; //specifically the number of the inode (we already have the root directory inode number as well)
 
-    kprintf("reached here\n");
     //guard cases
     if (bytecnt ==0) return 0;
     if (op != F_APPEND_SETEND && op != F_APPEND_STORE && op != F_APPEND_CREATE) return -ENOTSUP;
@@ -180,9 +179,9 @@ int ktfs_appender(struct cache* cache, struct ktfs_inode* inode, void * buf, int
         inode = &ktfs->root_directory_inode_data; //no filewrapper
         //pos is always "end of file" so to speak for the root directory inode
         pos = &ktfs->root_directory_inode_data.size;
-        kprintf("size in appender: %d\n",ktfs->root_directory_inode_data.size);
+        trace("size in appender: %d\n",ktfs->root_directory_inode_data.size);
         inode_num = ktfs->root_directory_inode;
-        kprintf("inode number: %d\n", inode_num);
+        trace("inode number: %d\n", inode_num);
     }
 
 
@@ -193,17 +192,21 @@ int ktfs_appender(struct cache* cache, struct ktfs_inode* inode, void * buf, int
     int nstored = 0;
     void * blkptr;
     while (nstored < bytecnt){
+        trace("*pos = %d\n", *pos);
         int allocated_index = -1;
         if (*pos % KTFS_BLKSZ == 0) {
+            trace("*pos = %d\n", *pos);
             allocated_index = ktfs_alloc_datablock(cache, inode, *pos/KTFS_BLKSZ); //in ANY case where pos is exactly a multiple of blksz, that means we're at the beginning of a new block
-            if (allocated_index <0) return allocated_index;                         //should always allocate in this case
+            if (allocated_index <0){
+                trace("alloc_datablock returned a negative value\n");
+                return allocated_index;
+            }//should always allocate in this case
         }
         if (allocated_index == -1) allocated_index = ktfs_get_block_absolute_idx(cache, inode, *pos/KTFS_BLKSZ); // alloc_index = -1 by the end of this that means we didn't have to allocate a new block for the operation
         int n_per_cycle = MIN(KTFS_BLKSZ, bytecnt - nstored);
-
         //actual store part
         if (cache_get_block(cache, allocated_index*KTFS_BLKSZ, &blkptr)<0){// (can make this a noop for setend and operations on the root directory inode, although that's a pretty trivial optimization)
-            kprintf("cache_get_block returned a negative value\n");
+            trace("cache_get_block returned a negative value\n");
 
             return -EINVAL;
         }
@@ -224,9 +227,9 @@ int ktfs_appender(struct cache* cache, struct ktfs_inode* inode, void * buf, int
     //
     //in this current impementation, we perform a DEEP COPY so that the file metadata persists in the filesystem
     //we do this at the end because doing in every loop would be abysmal TODO: maybe it is required in every loop though
-    kprintf("inode_num: %d\n", inode_num);
+    trace("inode_num: %d\n", inode_num);
     if (cache_get_block(cache, ((inode_num/KTFS_NUM_INODES_IN_BLOCK)+ktfs->inode_block_start)*KTFS_BLKSZ, &blkptr)< 0){
-        kprintf("cache_get_block returned a negative value\n");
+        trace("cache_get_block returned a negative value\n");
         return -EINVAL;
     }
     memcpy((char *)blkptr +inode_num*KTFS_INOSZ, inode, KTFS_INOSZ);//memcpy the inode back into the inode blocks at the correct position (given by inode_num% KTFS_NUM_INODES_IN_BLOCK
@@ -243,15 +246,16 @@ int ktfs_appender(struct cache* cache, struct ktfs_inode* inode, void * buf, int
 * NOTE: THIS DOESN"T HAVE ANY SIDE EFFECT ON THE FILE SIZE
 */
 int ktfs_alloc_datablock(struct cache* cache, struct ktfs_inode * inode, uint32_t contiguous_db_to_alloc){
-    trace("%s(cache=%p, inode=%p, contiguous_db_to_alloc=%u)\n", __func__, cache, inode, contiguous_db_to_alloc);
+    kprintf("%s(cache=%p, inode=%p, contiguous_db_to_alloc=%u)\n", __func__, cache, inode, contiguous_db_to_alloc);
     int alloc_db_idx;
     void * blkptr;
 
     //one by one checks needs for direct, indirect, and dindirect allocation
     
-
+    
     if (contiguous_db_to_alloc < KTFS_NUM_DIRECT_DATA_BLOCKS){
         alloc_db_idx = ktfs_find_and_use_free_db_slot(cache);
+        //kprintf("return from findand use free_db_slot funciton\n");
         if (alloc_db_idx <0) return alloc_db_idx;
         inode->block[contiguous_db_to_alloc] = alloc_db_idx;  
         return alloc_db_idx + ktfs->data_block_start;
@@ -296,7 +300,9 @@ int ktfs_alloc_datablock(struct cache* cache, struct ktfs_inode * inode, uint32_
 //simply a helper function for ktfs_alloc_datablock, since I'd have to write the smae code over and over again for otherwise
 //NOTE: RETURNS THE DATABLOCK IDX NOT ABSOLUTE IDX
 int ktfs_find_and_use_free_db_slot(struct cache * cache){
-    struct ktfs_bitmap * bitmap;
+    kprintf("%s(cache)", __func__);
+    struct ktfs_bitmap bitmap;
+    void * blkptr;
 
     //note that if this function returned a negative, the allocation should have ABSOLUTELY NEVER HAPPENED
 
@@ -306,19 +312,47 @@ int ktfs_find_and_use_free_db_slot(struct cache * cache){
     // ^ this code is actually wrong because the number of bits we should scan is acutally the max number of data_blocks
     int n_db = (ktfs->block_cnt - ktfs->data_block_start)* KTFS_BLKSZ;
     int curr_db = 0;
-
-    while (curr_db < n_db){
-        if (curr_db % KTFS_BLKSZ ==0) {
-            if (cache_get_block(cache, (ktfs->bitmap_block_start + curr_db/KTFS_BLKSZ)*KTFS_BLKSZ, (void **)&bitmap)<0) return -900; 
+    //mount_ktfs example from back when I was well rested
+            // int absolute_idx = ktfs_get_block_absolute_idx(ktfs->cache_ptr, &ktfs->root_directory_inode_data, i/KTFS_NUM_DENTRY_IN_BLOCK); 
+            // if (absolute_idx < 0) return absolute_idx;//propagate errors. more importantly this is the only function in mount that won't print an error for trace, so if it fails you know why
+            // cache_get_block(ktfs->cache_ptr, absolute_idx*KTFS_BLKSZ, &tempptr);
+            // if (retval <0){ 
+            //     trace("cache_get_block failed\n");
+            //     cache_release_block(ktfs->cache_ptr, (void *)superblock, 0);
+            //     return retval;
+            // } 
+            // //trace("got block for dentry scan\n");
+            // memcpy((void *)&dentry_block, tempptr, sizeof(dentry_block));
+            // cache_release_block(ktfs->cache_ptr, tempptr, 0);
+    // while (curr_db < n_db){
+    //     if (curr_db % KTFS_BLKSZ ==0) {
+    //         if (cache_get_block(cache, (ktfs->bitmap_block_start + curr_db/KTFS_BLKSZ)*KTFS_BLKSZ, &blkptr)<0) return -900; 
+    //         //memcpy((void*)&bitmap, blkptr, sizeof(struct ktfs_bitmap));
+    //
+    //     }
+    //     // if (bitmap->bytes[curr_db%KTFS_BLKSZ] ==0){
+    //     //     bitmap->bytes[curr_db%KTFS_BLKSZ] = 1;
+    //     //     cache_release_block(cache, blkptr, 1);
+    //     //     return curr_db;
+    //     // }
+    //
+    //     if (curr_db % KTFS_BLKSZ ==0) cache_release_block(cache, (void *)bitmap, 0); //accompanying release block in any case where we got one
+    //     curr_db++;
+    // }
+    while(curr_db < n_db){
+        int ndb_per_cycle = MIN(KTFS_BLKSZ, n_db - curr_db);
+        if (cache_get_block(cache, (ktfs->bitmap_block_start + curr_db/KTFS_BLKSZ)*KTFS_BLKSZ, &blkptr)<0) return -900;
+        
+        for (int i = 0; i < ndb_per_cycle; i++){
+            if(((char *)blkptr)[i] == 0){
+                ((char *)blkptr)[i] = 1;
+                cache_release_block(cache, blkptr, 1);
+                return curr_db;
+            }
+            curr_db++;
         }
-        if (bitmap->bytes[curr_db%KTFS_BLKSZ] ==0){
-            bitmap->bytes[curr_db%KTFS_BLKSZ] = 1;
-            cache_release_block(cache, (void *)bitmap, 1);
-            return curr_db;
-        }
+        cache_release_block(cache, blkptr, 0);
 
-        if (curr_db % KTFS_BLKSZ ==0) cache_release_block(cache, (void *)bitmap, 0); //accompanying release block in any case where we got one
-        curr_db++;
     }
 
     return -ENODATABLKS;
@@ -342,19 +376,36 @@ int ktfs_find_and_use_free_inode_slot(struct cache * cache){
     int curr_ino = 1; //start from 1 because 0 is the root directory inode
 
     while (curr_ino < n_ino){
-        if (curr_ino % KTFS_BLKSZ ==0) {
-            trace("pos:%d\n", ktfs->inode_bitmap_block_start + curr_ino/KTFS_NUM_INODES_IN_BLOCK);
-            if (cache_get_block(cache, (ktfs->inode_bitmap_block_start + curr_ino/KTFS_NUM_INODES_IN_BLOCK)*KTFS_BLKSZ, blkptr)<0) return -900;
-            memcpy((void *)&bitmap, blkptr, sizeof(struct ktfs_bitmap));
+        
+        int n_ino_per_cycle = MIN(KTFS_BLKSZ, n_ino - curr_ino);
+        if (cache_get_block(cache, (ktfs->bitmap_block_start + curr_ino/KTFS_BLKSZ)*KTFS_BLKSZ, &blkptr)<0) return -900;
+        
+        for (int i = 0; i < n_ino_per_cycle; i++){
+            if(((char *)blkptr)[i] == 0){
+                ((char *)blkptr)[i] = 1;
+                cache_release_block(cache, blkptr, 1);
+                return curr_ino;
+            }
+            curr_ino++;
         }
-        if (bitmap.bytes[curr_ino%KTFS_BLKSZ] ==0){
-            bitmap.bytes[curr_ino%KTFS_BLKSZ] = 1;
-            return curr_ino;
-        }
+        cache_release_block(cache, blkptr, 0);
+    }
+    // while (curr_ino < n_ino){
+    //     if (curr_ino % KTFS_BLKSZ ==0) {
+    //         trace("pos:%d\n", ktfs->inode_bitmap_block_start + curr_ino/KTFS_NUM_INODES_IN_BLOCK);
+    //         if (cache_get_block(cache, (ktfs->inode_bitmap_block_start + curr_ino/KTFS_NUM_INODES_IN_BLOCK)*KTFS_BLKSZ, blkptr)<0) return -900;
+    //         memcpy((void *)&bitmap, blkptr, sizeof(struct ktfs_bitmap));
+    //         cache_release_block(cache, blkptr, 0);
+    //     }
+    //     if (bitmap.bytes[curr_ino%KTFS_BLKSZ] ==0){
+    //         bitmap.bytes[curr_ino%KTFS_BLKSZ] = 1;
+    //
+    //         return curr_ino;
+    //     }
 
         //if (curr_ino % KTFS_BLKSZ ==0) cache_release_block(cache, (void *)bitmap, 0); //accompanying release block in any case where we got one
-        curr_ino++;
-    }
+    //     curr_ino++;
+    // }
 
     return -ENOINODEBLKS;
 }
@@ -412,7 +463,6 @@ int ktfs_get_block_absolute_idx(struct cache* cache, struct ktfs_inode* inode, u
         uint32_t indirect_index = ((uint32_t *)indirect)[(contiguous_db_index%(128*128))/128];
 
         cache_release_block(ktfs->cache_ptr, indirect,0);
-
 
         retval = cache_get_block(ktfs->cache_ptr, (ktfs->data_block_start + indirect_index)*KTFS_BLKSZ, (void **)&dindirect);
         if (retval < 0){ 
@@ -729,7 +779,7 @@ long ktfs_store(struct uio* uio, const void* buf, unsigned long len) {
     // FIXME
     // Similar to fetch
 
-    trace("%s(uio=%p, buf=%p, len=%u)", __func__, uio, buf, len);
+    trace("%s(uio=%p, buf=%p, len=%u)\n", __func__, uio, buf, len);
     if (!uio || !buf) return -EINVAL;
     
     if (len == 0) return 0; //both the pointers were validated but the caller has for some reason requested to read 0 bytes
@@ -739,10 +789,14 @@ long ktfs_store(struct uio* uio, const void* buf, unsigned long len) {
     int firstlen = len;
     int secondlen = 0;
     
+    
+    trace("file->pos: %d\n", file->pos);
     if (file->pos + len > file->inode_data.size){
         firstlen = file->inode_data.size - file->pos;
-        secondlen = len-firstlen;
+        secondlen = len - firstlen;
     } 
+    trace("firstlen: %d\n", firstlen);
+    trace("secondlen: %d\n", secondlen);
     
 
     if (!file->opened) return -EINVAL;
@@ -754,27 +808,34 @@ long ktfs_store(struct uio* uio, const void* buf, unsigned long len) {
 
     //case one: overwriting the file
     while (nstored < firstlen){
-        
+        //if (firstlen == 0) trace("null entry");
         nwritten = MIN(KTFS_BLKSZ - file->pos%KTFS_BLKSZ, firstlen - nstored); //chooses between the didtance btween the pos and the next block, or whatevers left to fetch
         
         absolute_idx = ktfs_get_block_absolute_idx(ktfs->cache_ptr, &file->inode_data, file->pos/KTFS_BLKSZ);
-        if (absolute_idx < 0) return absolute_idx; //propagate error
+        if (absolute_idx < 0) {
+            trace("absolute_idx <0");
+            return absolute_idx; //propagate error
+        }
 
-        retval = cache_get_block(ktfs->cache_ptr, absolute_idx*KTFS_BLKSZ, (void *) &cache_block);
+        trace("a number that is pretty important to us at this point: %d", absolute_idx*KTFS_BLKSZ);
+        retval = cache_get_block(ktfs->cache_ptr, absolute_idx*KTFS_BLKSZ, (void *)&cache_block);
         if (retval < 0){
             trace("cache_get_block failed: retval: %d\n", retval);
+            cache_release_block(ktfs->cache_ptr, cache_block, 0);
             return retval;
         }
-        //memcpy((char *)buf+nfetched, (char *)(cache_block->data)+(file->pos % KTFS_BLKSZ),nread); TODO: FIX MEMCPY LOGIC... THIS WHOLE THING WAS PASTED FROM FETCH
-        cache_release_block(ktfs->cache_ptr, (void*)cache_block, 0);
+        trace("ok so at this point we should have cache_get_blocked something lets see what happened about it");
+        memcpy((char *)buf+nstored, (char *)(cache_block->data)+(file->pos % KTFS_BLKSZ),nwritten); //TODO... THIS WHOLE THING WAS PASTED FROM FETCH
+        cache_release_block(ktfs->cache_ptr, cache_block, 1);
 
         nstored += nwritten;
         file->pos += nwritten;
     }
 
     //second case: append to end
-    nstored += ktfs_appender(ktfs->cache_ptr, &file->inode_data, (char*)buf+nstored, secondlen, F_APPEND_STORE); //keep in mind that this will return 0 if second len is 0
 
+    nstored += ktfs_appender(ktfs->cache_ptr, &file->inode_data, (char*)buf+nstored, secondlen, F_APPEND_STORE); //keep in mind that this will return 0 if second len is 0
+    trace("possibly another append issue?");
     return nstored; 
 }
 
@@ -785,7 +846,7 @@ long ktfs_store(struct uio* uio, const void* buf, unsigned long len) {
  * @return 0 if successful, negative error code if error
  */
 int ktfs_create(struct filesystem* fs, const char* name) { 
-    kprintf("%s(fs: %p, name :%s)\n",__func__, fs, name);
+    trace("%s(fs: %p, name :%s)\n",__func__, fs, name);
     //trace("ktfs->fs: %p\n", &ktfs->fs);
     //trace("fs: %p\n", fs);
     struct ktfs * ktfs_inst = (void *)fs - offsetof(struct ktfs, fs); //just incase we move towards multiple mountable ktfs
@@ -798,10 +859,10 @@ int ktfs_create(struct filesystem* fs, const char* name) {
     //trace("ktfs->max_inode_count in ktfs create: %d\n", ktfs->max_inode_count);
     //trace("ktfs_inst->root_directory_inode_data.size: %d and ktfs_inst->max_inode_count: %d\n", ktfs_inst->root_directory_inode_data.size/KTFS_DENSZ, ktfs_inst->max_inode_count);
     if (ktfs_inst->root_directory_inode_data.size/KTFS_DENSZ >= ktfs_inst->max_inode_count){
-        kprintf("the rdr was jacked up at this point\n");
+        trace("the rdr was jacked up at this point\n");
         return -EINVAL;//this is probably the most robust way of doing this without reading the rdr 
     }
-    kprintf("ktfs_create got: got through first 3 guard cases\n");
+    trace("ktfs_create got: got through first 3 guard cases\n");
 
     int i = 0; //search for file with matching name
     while (i< ktfs_inst->max_inode_count){
@@ -817,7 +878,7 @@ int ktfs_create(struct filesystem* fs, const char* name) {
     dentry.inode = ktfs_find_and_use_free_inode_slot(ktfs_inst->cache_ptr);
 
     if (dentry.inode< 0) {
-        kprintf("our find free inode funciton might be the one having issues\n");
+        trace("our find free inode funciton might be the one having issues\n");
         return dentry.inode; 
     }
     strncpy(dentry.name, name, KTFS_MAX_FILENAME_LEN);
@@ -832,10 +893,10 @@ int ktfs_create(struct filesystem* fs, const char* name) {
     cache_get_block(ktfs_inst->cache_ptr, ((ktfs_inst->root_directory_inode/KTFS_NUM_INODES_IN_BLOCK)+ ktfs_inst->inode_block_start)*KTFS_BLKSZ, &blkptr);
     struct ktfs_inode * rdr = (struct ktfs_inode*)blkptr + (ktfs_inst->root_directory_inode%KTFS_NUM_INODES_IN_BLOCK);
     //trace("ktfs->root_directory_inode%KTFS_NUM_INODES_IN_BLOCK: %d\n",ktfs_inst->root_directory_inode%KTFS_NUM_INODES_IN_BLOCK); fixed
-    kprintf("line %d: rdr_copy->size: %d\n",__LINE__, rdr_copy->size);
+    trace("line %d: rdr_copy->size: %d\n",__LINE__, rdr_copy->size);
     memcpy(rdr_copy, rdr, KTFS_INOSZ); 
     if (rdr->size + KTFS_DENSZ > KTFS_MAX_FILE_SIZE){
-        kprintf("rdr->size: %d, which is too big\n", rdr->size);
+        trace("rdr->size: %d, which is too big\n", rdr->size);
         cache_release_block(ktfs_inst->cache_ptr, blkptr, 0);
         return -ENOTSUP;
     }
@@ -915,22 +976,22 @@ int ktfs_delete(struct filesystem* fs, const char* name) {
     struct ktfs_inode * rdr_copy = &ktfs_inst->root_directory_inode_data;
     cache_get_block(ktfs_inst->cache_ptr, (ktfs_inst->root_directory_inode/KTFS_NUM_INODES_IN_BLOCK+ ktfs_inst->inode_block_start)*KTFS_BLKSZ, &blkptr);
     struct ktfs_inode* rdr = (struct ktfs_inode*)blkptr + (ktfs->root_directory_inode%KTFS_NUM_INODES_IN_BLOCK);
-    kprintf("the inode number that we're looking at: %d\n",ktfs->root_directory_inode%KTFS_NUM_INODES_IN_BLOCK);
+    trace("the inode number that we're looking at: %d\n",ktfs->root_directory_inode%KTFS_NUM_INODES_IN_BLOCK);
     if (rdr->size/KTFS_INOSZ < 1){
         cache_release_block(ktfs_inst->cache_ptr, blkptr, 0);
         return -7059;//ok for some reason something changed the root directory inode in the bookkeeping structure without us knowing?????
     }
 
-    kprintf("line %d: rdr_copy size:%d\n",__LINE__, ktfs_inst->root_directory_inode_data.size);
+    trace("line %d: rdr_copy size:%d\n",__LINE__, ktfs_inst->root_directory_inode_data.size);
     rdr->size -= KTFS_DENSZ;                                                                                         //note that we want to find the LAST datablock, not the start of the next one, which could happen if we have a full block at the end. for this case just decrement the size of a dentry before calling the function
     int last_db_abs_idx = ktfs_get_block_absolute_idx(ktfs_inst->cache_ptr, rdr, rdr->size/KTFS_NUM_DENTRY_IN_BLOCK);//before we decrement, find the absolute index of the last data-block in the inode
 
-    kprintf("line %d: rdr_copy size:%d\n",__LINE__, ktfs_inst->root_directory_inode_data.size);
+    trace("line %d: rdr_copy size:%d\n",__LINE__, ktfs_inst->root_directory_inode_data.size);
     memcpy(rdr_copy, rdr, KTFS_INOSZ);
     cache_release_block(ktfs_inst->cache_ptr, blkptr, 1);
 
 
-    kprintf("line %d: rdr_copy size:%d\n",__LINE__, ktfs_inst->root_directory_inode_data.size);
+    trace("line %d: rdr_copy size:%d\n",__LINE__, ktfs_inst->root_directory_inode_data.size);
     //remove file from file records
     kfree(records->filetab[i]);
     records->filetab[i] = NULL;
@@ -944,7 +1005,7 @@ int ktfs_delete(struct filesystem* fs, const char* name) {
     ktfs_free_inode_slot(ktfs_inst->cache_ptr, dentry->inode);
     cache_release_block(ktfs_inst->cache_ptr, blkptr, 1);
 
-    kprintf("line %d: rdr_copy size:%d\n",__LINE__, ktfs_inst->root_directory_inode_data.size);
+    trace("line %d: rdr_copy size:%d\n",__LINE__, ktfs_inst->root_directory_inode_data.size);
     if (rdr_copy->size%KTFS_BLKSZ != 0) return 0; //ez dubz
     
     //not so easy dubz: 
