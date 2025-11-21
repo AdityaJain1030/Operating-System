@@ -161,7 +161,7 @@ int ktfs_free_inode_slot(struct cache* cache, uint32_t inode_slot_num){
 int ktfs_appender(struct cache* cache, struct ktfs_inode* inode, void * buf, int bytecnt, int op){ 
     trace("%s(cache=%p, inode=%p, bytecnt=%u)\n", __func__, cache, inode, bytecnt);
     struct ktfs_file * file_wrapper;
-    uint32_t * pos;
+    uint32_t * pos= NULL;
     uint16_t inode_num; //specifically the number of the inode (we already have the root directory inode number as well)
 
     //guard cases
@@ -178,7 +178,8 @@ int ktfs_appender(struct cache* cache, struct ktfs_inode* inode, void * buf, int
     else if (op==F_APPEND_CREATE){
         inode = &ktfs->root_directory_inode_data; //no filewrapper
         //pos is always "end of file" so to speak for the root directory inode
-        pos = &ktfs->root_directory_inode_data.size;
+        int size = ktfs->root_directory_inode_data.size;
+        *pos = size;
         trace("size in appender: %d\n",ktfs->root_directory_inode_data.size);
         inode_num = ktfs->root_directory_inode;
         trace("inode number: %d\n", inode_num);
@@ -290,6 +291,8 @@ int ktfs_alloc_datablock(struct cache* cache, struct ktfs_inode * inode, uint32_
     contiguous_db_to_alloc -= 128;
 
     //TODO: dindirect case
+    //
+    
 
 
     return -ENOTSUP; 
@@ -301,7 +304,7 @@ int ktfs_alloc_datablock(struct cache* cache, struct ktfs_inode * inode, uint32_
 //NOTE: RETURNS THE DATABLOCK IDX NOT ABSOLUTE IDX
 int ktfs_find_and_use_free_db_slot(struct cache * cache){
     kprintf("%s(cache)", __func__);
-    struct ktfs_bitmap bitmap;
+    //struct ktfs_bitmap bitmap;
     void * blkptr;
 
     //note that if this function returned a negative, the allocation should have ABSOLUTELY NEVER HAPPENED
@@ -344,8 +347,10 @@ int ktfs_find_and_use_free_db_slot(struct cache * cache){
         if (cache_get_block(cache, (ktfs->bitmap_block_start + curr_db/KTFS_BLKSZ)*KTFS_BLKSZ, &blkptr)<0) return -900;
         
         for (int i = 0; i < ndb_per_cycle; i++){
-            if(((char *)blkptr)[i] == 0){
-                ((char *)blkptr)[i] = 1;
+            int index = i / 8;
+            int offset = i % 8;
+            if((((char *)blkptr)[index] & (1<< offset))== 0){
+                ((char *)blkptr)[index] |= (1<<offset);
                 cache_release_block(cache, blkptr, 1);
                 return curr_db;
             }
@@ -363,7 +368,7 @@ int ktfs_find_and_use_free_db_slot(struct cache * cache){
 //simply a helper function for ktfs_alloc_datablock, since I'd have to write the smae code over and over again for otherwise
 //NOTE: RETURNS THE DATABLOCK IDX NOT ABSOLUTE IDX
 int ktfs_find_and_use_free_inode_slot(struct cache * cache){
-    struct ktfs_bitmap bitmap;
+    //struct ktfs_bitmap bitmap;
     void * blkptr;
 
     //note that if this function returned a negative, the allocation should have ABSOLUTELY NEVER HAPPENED
@@ -381,8 +386,10 @@ int ktfs_find_and_use_free_inode_slot(struct cache * cache){
         if (cache_get_block(cache, (ktfs->bitmap_block_start + curr_ino/KTFS_BLKSZ)*KTFS_BLKSZ, &blkptr)<0) return -900;
         
         for (int i = 0; i < n_ino_per_cycle; i++){
-            if(((char *)blkptr)[i] == 0){
-                ((char *)blkptr)[i] = 1;
+            int index = i / 8;
+            int offset = i % 8;
+            if((((char *)blkptr)[index] & (1<< offset))== 0){
+                ((char *)blkptr)[index] |= (1<<offset);
                 cache_release_block(cache, blkptr, 1);
                 return curr_ino;
             }
