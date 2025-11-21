@@ -42,8 +42,8 @@
 //create operates on the root directory inode, which needs to be fetched from the backing device, (pass NULL for inode)
 //and setend the operation into a noop/memset0 (haven't decided which one yet) on the file of choice (pass NULL for buf and bytecnt)
 #define F_APPEND_STORE 0
-#define F_APPEND_CREATE 0 
-#define F_APPEND_SETEND 1
+#define F_APPEND_CREATE 1
+#define F_APPEND_SETEND 2
 
 // INTERNAL TYPE DEFINITIONS
 //
@@ -159,11 +159,12 @@ int ktfs_free_inode_slot(struct cache* cache, uint32_t inode_slot_num){
 * @ ANOTHER NOTE TO CALLER: MAKE SURE THE ROOT DIRECTORY INODE IS DYNAMICALLY ALLOCATED ATLEAST FOR THE DURATION OF THIS FUNCTION! I DO NOT WANT THAT SHIT ON THE STACK
 */
 int ktfs_appender(struct cache* cache, struct ktfs_inode* inode, void * buf, int bytecnt, int op){ 
-    trace("%s(cache=%p, inode=%p, bytecnt=%u)", __func__, cache, inode, bytecnt);
+    kprintf("%s(cache=%p, inode=%p, bytecnt=%u)\n", __func__, cache, inode, bytecnt);
     struct ktfs_file * file_wrapper;
     uint32_t * pos;
     uint16_t inode_num; //specifically the number of the inode (we already have the root directory inode number as well)
 
+    kprintf("reached here\n");
     //guard cases
     if (bytecnt ==0) return 0;
     if (op != F_APPEND_SETEND && op != F_APPEND_STORE && op != F_APPEND_CREATE) return -ENOTSUP;
@@ -179,7 +180,9 @@ int ktfs_appender(struct cache* cache, struct ktfs_inode* inode, void * buf, int
         inode = &ktfs->root_directory_inode_data; //no filewrapper
         //pos is always "end of file" so to speak for the root directory inode
         pos = &ktfs->root_directory_inode_data.size;
+        kprintf("size in appender: %d\n",ktfs->root_directory_inode_data.size);
         inode_num = ktfs->root_directory_inode;
+        kprintf("inode number: %d\n", inode_num);
     }
 
 
@@ -199,8 +202,8 @@ int ktfs_appender(struct cache* cache, struct ktfs_inode* inode, void * buf, int
         int n_per_cycle = MIN(KTFS_BLKSZ, bytecnt - nstored);
 
         //actual store part
-        if (cache_get_block(cache, allocated_index, &blkptr)<0){// (can make this a noop for setend and operations on the root directory inode, although that's a pretty trivial optimization)
-            trace("cache_get_block returned a negative value\n");
+        if (cache_get_block(cache, allocated_index*KTFS_BLKSZ, &blkptr)<0){// (can make this a noop for setend and operations on the root directory inode, although that's a pretty trivial optimization)
+            kprintf("cache_get_block returned a negative value\n");
 
             return -EINVAL;
         }
@@ -211,16 +214,19 @@ int ktfs_appender(struct cache* cache, struct ktfs_inode* inode, void * buf, int
         //increment values
         nstored += n_per_cycle;
         *pos += n_per_cycle;
-        if (pos != F_APPEND_CREATE) inode->size += n_per_cycle; //because for "create" there is no filewrapper, and the pos itsself points to size
+        if (op != F_APPEND_CREATE) inode->size += n_per_cycle; //because for "create" there is no filewrapper, and the pos itsself points to size
 
     }
 
+    //cache_get_block(ktfs_inst->cache_ptr, (ktfs_inst->root_directory_inode/KTFS_NUM_INODES_IN_BLOCK), &blkptr);
+    //struct ktfs_inode* rdr = (struct ktfs_inode*)blkptr + (ktfs->root_directory_inode%KTFS_NUM_INODES_IN_BLOCK);
     //lmao I was so sleep deprived that I forgot that I accounted for this, and then designed around this not happening
     //
     //in this current impementation, we perform a DEEP COPY so that the file metadata persists in the filesystem
     //we do this at the end because doing in every loop would be abysmal TODO: maybe it is required in every loop though
+    kprintf("inode_num: %d\n", inode_num);
     if (cache_get_block(cache, ((inode_num/KTFS_NUM_INODES_IN_BLOCK)+ktfs->inode_block_start)*KTFS_BLKSZ, &blkptr)< 0){
-        trace("cache_get_block returned a negative value\n");
+        kprintf("cache_get_block returned a negative value\n");
         return -EINVAL;
     }
     memcpy((char *)blkptr +inode_num*KTFS_INOSZ, inode, KTFS_INOSZ);//memcpy the inode back into the inode blocks at the correct position (given by inode_num% KTFS_NUM_INODES_IN_BLOCK
@@ -779,7 +785,7 @@ long ktfs_store(struct uio* uio, const void* buf, unsigned long len) {
  * @return 0 if successful, negative error code if error
  */
 int ktfs_create(struct filesystem* fs, const char* name) { 
-    trace("%s(fs: %p, name :%s)\n",__func__, fs, name);
+    kprintf("%s(fs: %p, name :%s)\n",__func__, fs, name);
     //trace("ktfs->fs: %p\n", &ktfs->fs);
     //trace("fs: %p\n", fs);
     struct ktfs * ktfs_inst = (void *)fs - offsetof(struct ktfs, fs); //just incase we move towards multiple mountable ktfs
@@ -791,8 +797,11 @@ int ktfs_create(struct filesystem* fs, const char* name) {
     if (strlen(name) > KTFS_MAX_FILENAME_LEN) return -ENOTSUP;
     //trace("ktfs->max_inode_count in ktfs create: %d\n", ktfs->max_inode_count);
     //trace("ktfs_inst->root_directory_inode_data.size: %d and ktfs_inst->max_inode_count: %d\n", ktfs_inst->root_directory_inode_data.size/KTFS_DENSZ, ktfs_inst->max_inode_count);
-    if (ktfs_inst->root_directory_inode_data.size/KTFS_DENSZ >= ktfs_inst->max_inode_count) return -EINVAL;//this is probably the most robust way of doing this without reading the rdr 
-    trace("ktfs_create got: got through first 3 guard cases\n");
+    if (ktfs_inst->root_directory_inode_data.size/KTFS_DENSZ >= ktfs_inst->max_inode_count){
+        kprintf("the rdr was jacked up at this point\n");
+        return -EINVAL;//this is probably the most robust way of doing this without reading the rdr 
+    }
+    kprintf("ktfs_create got: got through first 3 guard cases\n");
 
     int i = 0; //search for file with matching name
     while (i< ktfs_inst->max_inode_count){
@@ -807,7 +816,10 @@ int ktfs_create(struct filesystem* fs, const char* name) {
     struct ktfs_dir_entry dentry;    
     dentry.inode = ktfs_find_and_use_free_inode_slot(ktfs_inst->cache_ptr);
 
-    if (dentry.inode< 0) return dentry.inode;
+    if (dentry.inode< 0) {
+        kprintf("our find free inode funciton might be the one having issues\n");
+        return dentry.inode; 
+    }
     strncpy(dentry.name, name, KTFS_MAX_FILENAME_LEN);
     
     //actually write the inode into the file system (u forgot this u dingus):
@@ -820,10 +832,10 @@ int ktfs_create(struct filesystem* fs, const char* name) {
     cache_get_block(ktfs_inst->cache_ptr, ((ktfs_inst->root_directory_inode/KTFS_NUM_INODES_IN_BLOCK)+ ktfs_inst->inode_block_start)*KTFS_BLKSZ, &blkptr);
     struct ktfs_inode * rdr = (struct ktfs_inode*)blkptr + (ktfs_inst->root_directory_inode%KTFS_NUM_INODES_IN_BLOCK);
     //trace("ktfs->root_directory_inode%KTFS_NUM_INODES_IN_BLOCK: %d\n",ktfs_inst->root_directory_inode%KTFS_NUM_INODES_IN_BLOCK); fixed
-    //trace("rdr_copy->size: %d\n", rdr_copy->size);
+    kprintf("line %d: rdr_copy->size: %d\n",__LINE__, rdr_copy->size);
     memcpy(rdr_copy, rdr, KTFS_INOSZ); 
     if (rdr->size + KTFS_DENSZ > KTFS_MAX_FILE_SIZE){
-        trace("rdr->size: %d, which is too big\n", rdr->size);
+        kprintf("rdr->size: %d, which is too big\n", rdr->size);
         cache_release_block(ktfs_inst->cache_ptr, blkptr, 0);
         return -ENOTSUP;
     }
@@ -832,7 +844,8 @@ int ktfs_create(struct filesystem* fs, const char* name) {
     
 
     //append file onto root directory inode
-    ktfs_appender(ktfs_inst->cache_ptr, (void *)rdr_copy, (void *)&dentry, KTFS_DENSZ, F_APPEND_CREATE);
+    ktfs_appender(ktfs_inst->cache_ptr, rdr_copy, (void *)&dentry, KTFS_DENSZ, F_APPEND_CREATE);
+    
     cache_get_block(ktfs_inst->cache_ptr, ((ktfs->root_directory_inode/KTFS_NUM_INODES_IN_BLOCK)+ ktfs->inode_block_start)*KTFS_BLKSZ, &blkptr);//found the mistake... how did you do that twice???
     rdr = (struct ktfs_inode*)blkptr + (ktfs->root_directory_inode%KTFS_NUM_INODES_IN_BLOCK);
     trace("rdr_copy->size: %d and rdr->size: %d\n", rdr_copy->size, rdr->size);
@@ -842,8 +855,8 @@ int ktfs_create(struct filesystem* fs, const char* name) {
 
 
 
-    //this must be kept i'm pretty sure
-    cache_get_block(ktfs_inst->cache_ptr, (dentry.inode/KTFS_NUM_INODES_IN_BLOCK+ktfs_inst->data_block_start)*KTFS_BLKSZ, &blkptr);
+    //memset inode TODO: DO WE NEED TO KEEP THIS?
+    cache_get_block(ktfs_inst->cache_ptr, (dentry.inode/KTFS_NUM_INODES_IN_BLOCK+ktfs_inst->inode_block_start)*KTFS_BLKSZ, &blkptr);//error here, should've been inode blockstart
     memset((struct ktfs_inode *)blkptr+ dentry.inode%KTFS_NUM_INODES_IN_BLOCK, 0, KTFS_INOSZ);
     cache_release_block(ktfs_inst->cache_ptr, blkptr, 1);
 
@@ -881,6 +894,7 @@ int ktfs_delete(struct filesystem* fs, const char* name) {
     void * blkptr;
 
 
+
     if (!fs || !name) return -EINVAL;
     if (strlen(name) > KTFS_MAX_FILENAME_LEN) return -ENOTSUP;
     if (ktfs_inst->root_directory_inode_data.size/KTFS_DENSZ < 1) return -EINVAL;
@@ -899,18 +913,24 @@ int ktfs_delete(struct filesystem* fs, const char* name) {
     //copy rdr onto bookkeeping (good measure), 
     //decrement on bookkeeper and disk, and then release the block (if size goes down indices don't have to be updated) TODO: MAKE ABSOLUTELY SURE!!!!!
     struct ktfs_inode * rdr_copy = &ktfs_inst->root_directory_inode_data;
-    cache_get_block(ktfs_inst->cache_ptr, (ktfs_inst->root_directory_inode/KTFS_NUM_INODES_IN_BLOCK), &blkptr);
+    cache_get_block(ktfs_inst->cache_ptr, (ktfs_inst->root_directory_inode/KTFS_NUM_INODES_IN_BLOCK+ ktfs_inst->inode_block_start)*KTFS_BLKSZ, &blkptr);
     struct ktfs_inode* rdr = (struct ktfs_inode*)blkptr + (ktfs->root_directory_inode%KTFS_NUM_INODES_IN_BLOCK);
+    kprintf("the inode number that we're looking at: %d\n",ktfs->root_directory_inode%KTFS_NUM_INODES_IN_BLOCK);
     if (rdr->size/KTFS_INOSZ < 1){
         cache_release_block(ktfs_inst->cache_ptr, blkptr, 0);
         return -7059;//ok for some reason something changed the root directory inode in the bookkeeping structure without us knowing?????
     }
+
+    kprintf("line %d: rdr_copy size:%d\n",__LINE__, ktfs_inst->root_directory_inode_data.size);
     rdr->size -= KTFS_DENSZ;                                                                                         //note that we want to find the LAST datablock, not the start of the next one, which could happen if we have a full block at the end. for this case just decrement the size of a dentry before calling the function
     int last_db_abs_idx = ktfs_get_block_absolute_idx(ktfs_inst->cache_ptr, rdr, rdr->size/KTFS_NUM_DENTRY_IN_BLOCK);//before we decrement, find the absolute index of the last data-block in the inode
+
+    kprintf("line %d: rdr_copy size:%d\n",__LINE__, ktfs_inst->root_directory_inode_data.size);
     memcpy(rdr_copy, rdr, KTFS_INOSZ);
     cache_release_block(ktfs_inst->cache_ptr, blkptr, 1);
 
 
+    kprintf("line %d: rdr_copy size:%d\n",__LINE__, ktfs_inst->root_directory_inode_data.size);
     //remove file from file records
     kfree(records->filetab[i]);
     records->filetab[i] = NULL;
@@ -924,6 +944,7 @@ int ktfs_delete(struct filesystem* fs, const char* name) {
     ktfs_free_inode_slot(ktfs_inst->cache_ptr, dentry->inode);
     cache_release_block(ktfs_inst->cache_ptr, blkptr, 1);
 
+    kprintf("line %d: rdr_copy size:%d\n",__LINE__, ktfs_inst->root_directory_inode_data.size);
     if (rdr_copy->size%KTFS_BLKSZ != 0) return 0; //ez dubz
     
     //not so easy dubz: 
