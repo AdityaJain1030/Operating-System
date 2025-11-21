@@ -5,6 +5,7 @@
 
 */
 
+#include <stddef.h>
 #include <stdint.h>
 #ifdef MEMORY_TRACE
 #define TRACE
@@ -529,17 +530,15 @@ void *map_page(uintptr_t vma, void *pp, int rwxug_flags) {
     // right thing to care about??
     // I will keep it in here anyway because we will know if its expected
     // from the ag panic message
-    if (vma & (PAGE_SIZE - 1))  // trick to see if its algiend or not. If its not aligend what do we do?
+    // if (vma & (PAGE_SIZE - 1))  // trick to see if its algiend or not. If its not aligend what do we do?
+    // {
+    //     // do something not sure yet
+    //     // throw an exception maybe?
+    //     panic("mapping virtual address, virtual address is NOT page aligned!");
+    // }
+    if (vma <= UMEM_START_VMA)
     {
-        // do something not sure yet
-        // throw an exception maybe?
-        panic("mapping virtual address, virtual address is NOT page aligned!");
-    }
-
-    
-    if (vma <= 0xC0000000)
-    {
-        panic("mapping to kernel, we should not do this");
+        kprintf("mapping to kernel, we should not do this");
         // directly accessed using ppn. Technically we should not be remapping kernel. Please error here
     }
 
@@ -557,7 +556,7 @@ void *map_page(uintptr_t vma, void *pp, int rwxug_flags) {
         memset(newpage, 0, PAGE_SIZE);
 
         // connect to root page
-        pt2[VPN2(vma)] = ptab_pte((struct pte*)newpage, 0);
+        pt2[VPN2(vma)] = ptab_pte((struct pte*)newpage, PTE_G & rwxug_flags);
     }
     
     // get the next level (keeping as much convention from alex as possible)
@@ -577,13 +576,15 @@ void *map_page(uintptr_t vma, void *pp, int rwxug_flags) {
     }
 
     // get ppn for the 0 page
-    uintptr_t pt0_ppn = pt1[VPN2(vma)].ppn;
+    uintptr_t pt0_ppn = pt1[VPN1(vma)].ppn;
     struct pte *pt0 = (struct pte*)pageptr(pt0_ppn);
 
-    // what do we do if pt0 is already valid?
-
+    // if leaf is valid return?? panic??
+    // if (PTE_VALID(pt0[VPN0(vma)])) return (void *);
+    // what do we do if pt0 is already valid? we will just leak memory and remap for now
     pt0[VPN0(vma)] = leaf_pte(pp, rwxug_flags);
 
+    // clear tlb
     sfence_vma();
 
     return (void *) vma;
@@ -593,7 +594,7 @@ void *map_range(uintptr_t vma, size_t size, void *pp, int rwxug_flags) {
     // FIXME
     /*
     DAmn it all. Idk if they are contiuosu or no. 
-    
+    DEET: they are continuous according to doxygen
     */
     int num_pages = ROUND_UP(size, PAGE_SIZE) / PAGE_SIZE;
     for (int i = 0; i < num_pages; i++)
@@ -612,11 +613,73 @@ void *alloc_and_map_range(uintptr_t vma, size_t size, int rwxug_flags) {
 
 void set_range_flags(const void *vp, size_t size, int rwxug_flags) {
     // FIXME
+    // round up size
+    size = ROUND_UP(size, PAGE_SIZE);
+
+    struct pte *lvl_2_root = active_space_ptab();
+
+    // we know that vp is a multiple of PAGE_SIZE from doxygen
+    for (uintptr_t vma = (uintptr_t)vp; vma < (uintptr_t)vp + size; vma+=PAGE_SIZE)
+    {
+        // get vpns
+        int vpn2 = VPN2(vma);
+        int vpn1 = VPN1(vma);
+        int vpn0 = VPN0(vma);
+
+        // check if level 2 pte exists
+        if (!PTE_VALID(lvl_2_root[vpn2])) panic("l2 root pte missing for vma (set_range_flags)");
+
+        // check if level 1 pte exists
+        struct pte *lvl_1_root = pageptr(lvl_2_root[vpn2].ppn);        
+        if (!PTE_VALID(lvl_1_root[vpn1])) panic("l1 root pte missing for vma (set_range_flags)");
+        
+        // check if level 0 pte exists (leaf)
+        struct pte *lvl_0_root = pageptr(lvl_1_root[vpn1].ppn);        
+        if (!PTE_VALID(lvl_0_root[vpn0])) panic("l0 leaf pte missing for vma (set_range_flags)");
+
+        // i think this is the right way to do it.
+        lvl_0_root[VPN0(vma)].flags = rwxug_flags | PTE_A | PTE_D | PTE_V;
+    }
+    // reset tlb
+    sfence_vma();
     return;
+
 }
 
 void unmap_and_free_range(void *vp, size_t size) {
     // FIXME
+    /// same as set_range_flags essentially
+    size = ROUND_UP(size, PAGE_SIZE);
+
+    struct pte *lvl_2_root = active_space_ptab();
+
+    // we know that vp is a multiple of PAGE_SIZE from doxygen
+    for (uintptr_t vma = (uintptr_t)vp; vma < (uintptr_t)vp + size; vma+=PAGE_SIZE)
+    {
+        // get vpns
+        int vpn2 = VPN2(vma);
+        int vpn1 = VPN1(vma);
+        int vpn0 = VPN0(vma);
+
+        // check if level 2 pte exists
+        if (!PTE_VALID(lvl_2_root[vpn2])) continue;
+
+        // check if level 1 pte exists
+        struct pte *lvl_1_root = pageptr(lvl_2_root[vpn2].ppn);        
+        if (!PTE_VALID(lvl_1_root[vpn1])) continue;
+        
+        // check if level 0 pte exists (leaf)
+        struct pte *lvl_0_root = pageptr(lvl_1_root[vpn1].ppn);        
+        if (!PTE_VALID(lvl_0_root[vpn0])) continue;
+        if (PTE_GLOBAL(lvl_0_root[vpn0])) continue; // we dont wan free globals
+
+        // free page
+        free_phys_page(pageptr(lvl_0_root[vpn0].ppn));
+        lvl_0_root[vpn0] = null_pte();
+        
+    }
+    // reset tlb
+    sfence_vma();
     return;
 }
 
