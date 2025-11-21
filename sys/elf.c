@@ -196,7 +196,7 @@ int elf_load(struct uio* uio, void (**eptr)(void)) {
         if (phdr.p_flags & PF_R) program_rwxug |= PTE_R;
         if (phdr.p_flags & PF_W) program_rwxug |= PTE_W;
         if (phdr.p_flags & PF_X) program_rwxug |= PTE_X;
-        void* addr = alloc_and_map_range((uintptr_t)phdr.p_vaddr, (size_t)phdr.p_memsz, PTE_W); //yeah just make sure sstatus.SUM is on for this next part
+        void* addr = alloc_and_map_range((uintptr_t)phdr.p_vaddr, (size_t)phdr.p_memsz, PTE_R | PTE_X | PTE_U | PTE_W); //yeah just make sure sstatus.SUM is on for this next part
 
 
         //char * vaddr = (char *) phdr.p_vaddr;
