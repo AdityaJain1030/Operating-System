@@ -59,7 +59,7 @@ void main(void) {
 
     // struct uio *trek;
     // int err = open_file(const char *mpname, const char *flname, struct uio **uioptr)
-    mount_cdrive();
+    // mount_cdrive();
     run_init();
 
 }
@@ -129,12 +129,12 @@ void run_init(void) {
     struct uio* ramdisk_dev;
     int result;
 
-    // result = open_file(CMNTNAME, INITEXE, &initexe);
+    result = open_file(CMNTNAME, INITEXE, &initexe);
 
-    // if (result != 0) {
-    //     kprintf(INITEXE ": %s; terminating\n", error_name(result));
-    //     halt_failure();
-    // }
+    if (result != 0) {
+        kprintf(INITEXE ": %s; terminating\n", error_name(result));
+        halt_failure();
+    }
 
     // result = open_file(DEVMNTNAME, "uart1", &uart_dev);
     // //result = open_file(DEVMNTNAME, "ramdisk0", &ramdisk_dev);
@@ -147,14 +147,15 @@ void run_init(void) {
     //  Note that trek takes in a uio object to output to the console
     // void (*start_trek)(struct uio*);
     // void (*start_adele)(struct uio*);
-
-    // elf_load(initexe, &start_adele);
-
+    struct process *curr = running_thread_process();
+    open_file(DEVMNTNAME, "uart1",&curr->uiotab[2]);
+    process_exec(initexe, 1, NULL);
+    // elf_load(initexe, &start_trek);
     // start_adele(uart_dev);
 
     // stuff I added
     //test_uio_control_ramdisk_read();
-    test_elf_load_with_ramdisk_uio();
+    // test_elf_load_with_ramdisk_uio();
 }
 
 
