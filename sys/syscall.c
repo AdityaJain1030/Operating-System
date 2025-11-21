@@ -401,7 +401,20 @@ int sysclose(int fd) {
  * @return number of bytes read
  */
 
-long sysread(int fd, void *buf, size_t bufsz) { return 0; }
+long sysread(int fd, void *buf, size_t bufsz) {
+    // check fd
+    // check if buf is valid
+    // profit
+    if (fd < 0) return -EBADFD;
+    if (fd >= PROCESS_UIOMAX) return -EBADFD;
+    struct process *running = current_process();
+    if (running->uiotab[fd] == NULL) return -ENOENT;
+
+    // check buf
+    if (validate_vptr(buf, bufsz, PTE_U | PTE_R) != 0) return -EINVAL;
+
+    return uio_read(running->uiotab[fd], buf, bufsz);
+}
 
 /**
  * @brief Calls write function of file io on given buffer
@@ -413,7 +426,18 @@ long sysread(int fd, void *buf, size_t bufsz) { return 0; }
  * @return number of bytes written
  */
 
-long syswrite(int fd, const void *buf, size_t len) { return 0; }
+long syswrite(int fd, const void *buf, size_t len) {
+    // copy sys_read
+    if (fd < 0) return -EBADFD;
+    if (fd >= PROCESS_UIOMAX) return -EBADFD;
+    struct process *running = current_process();
+    if (running->uiotab[fd] == NULL) return -ENOENT;
+
+    // check buf
+    if (validate_vptr(buf, len, PTE_U | PTE_W) != 0) return -EINVAL;
+
+    return uio_write(running->uiotab[fd], buf, len);
+}
 
 /**
  * @brief Calls device input output commands for a given device instance
@@ -425,7 +449,20 @@ long syswrite(int fd, const void *buf, size_t len) { return 0; }
  * @return number of bytes written
  */
 
-int sysfcntl(int fd, int cmd, void *arg) { return 0; }
+int sysfcntl(int fd, int cmd, void *arg) {
+    // copy sys_read
+    if (fd < 0) return -EBADFD;
+    if (fd >= PROCESS_UIOMAX) return -EBADFD;
+    struct process *running = current_process();
+    if (running->uiotab[fd] == NULL) return -ENOENT;
+
+    // idk how much of arg to validate so im just gonna put this here fornow
+    if (validate_vptr(arg, sizeof(unsigned long long), PTE_U | PTE_R) != 0) return -EINVAL;
+
+    return uio_cntl(running->uiotab[fd], cmd, arg);
+
+    return 0;
+}
 
 /**
  * @brief Creates a pipe for the current process
@@ -437,7 +474,10 @@ int sysfcntl(int fd, int cmd, void *arg) { return 0; }
  * @return 0 on success. Else, negative error code on invalid file descriptor, or if a file
  * descriptor is already in use, or if no descriptors are found available.
  */
-int syspipe(int *wfdptr, int *rfdptr) { return 0; }
+int syspipe(int *wfdptr, int *rfdptr) {
+    // cp3
+    return 0;
+}
 
 /**
  * @brief Duplicates a file description
@@ -449,4 +489,7 @@ int syspipe(int *wfdptr, int *rfdptr) { return 0; }
  * descriptor
  */
 
-int sysuiodup(int oldfd, int newfd) { return 0; }
+int sysuiodup(int oldfd, int newfd) {
+    // cp3
+    return 0;
+}
