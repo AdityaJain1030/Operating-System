@@ -148,8 +148,8 @@ void run_init(void) {
     // void (*start_trek)(struct uio*);
     // void (*start_adele)(struct uio*);
     struct process *curr = running_thread_process();
-    open_file(DEVMNTNAME, "uart0",&curr->uiotab[2]);
-    char *argv[] = { NULL, NULL };
+    open_file(DEVMNTNAME, "uart1",&curr->uiotab[2]);
+    char *argv[] = { "trek", NULL };
     process_exec(initexe, 1, argv);
     // elf_load(initexe, &start_trek);
     // start_adele(uart_dev);

@@ -65,7 +65,7 @@ CFLAGS += -I.
 # CFLAGS += -DKTFS_DEBUG -DKTFS_TRACE
 # CFLAGS += -DELF_DEBUG -DELF_TRACE
 
-ASFLAGS = -march=rv64imazicsr
+ASFLAGS = -march=rv64imazicsr -g -gdwarf-2 # try this
 LDFLAGS = -melf64lriscv
 
 QEMUOPTS = -global virtio-mmio.force-legacy=false
