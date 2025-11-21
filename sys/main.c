@@ -27,7 +27,7 @@
 
 #define CMNTNAME "c"
 #define DEVMNTNAME "dev"
-#define CDEVNAME "ramdisk"
+#define CDEVNAME "vioblk"
 #define CDEVINST 0
 
 #ifndef NUART  // number of UARTs
@@ -59,7 +59,7 @@ void main(void) {
 
     // struct uio *trek;
     // int err = open_file(const char *mpname, const char *flname, struct uio **uioptr)
-    // mount_cdrive();
+    mount_cdrive();
     run_init();
 
 }
@@ -148,7 +148,7 @@ void run_init(void) {
     // void (*start_trek)(struct uio*);
     // void (*start_adele)(struct uio*);
     struct process *curr = running_thread_process();
-    open_file(DEVMNTNAME, "uart1",&curr->uiotab[2]);
+    open_file(DEVMNTNAME, "uart0",&curr->uiotab[2]);
     process_exec(initexe, 1, NULL);
     // elf_load(initexe, &start_trek);
     // start_adele(uart_dev);

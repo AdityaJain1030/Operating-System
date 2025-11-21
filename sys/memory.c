@@ -360,7 +360,9 @@ void memory_init(void) {
     // bugs that cause inadvertent access to user memory (due to bugs).
 
     csrs_sstatus(RISCV_SSTATUS_SUM);
-
+    // maybe the tlb not updated?
+    sfence_vma();
+    
     memory_initialized = 1;
 }
 
@@ -536,9 +538,9 @@ void *map_page(uintptr_t vma, void *pp, int rwxug_flags) {
     //     // throw an exception maybe?
     //     panic("mapping virtual address, virtual address is NOT page aligned!");
     // }
-    if (vma <= UMEM_START_VMA)
+    if (vma < UMEM_START_VMA)
     {
-        kprintf("mapping to kernel, we should not do this");
+        kprintf("mapping to kernel, we should not do this\n");
         // directly accessed using ppn. Technically we should not be remapping kernel. Please error here
     }
 
@@ -821,6 +823,7 @@ void *alloc_phys_pages(unsigned int cnt) {
             actual_chunk = head->next;
             min_cnt = MIN(min_cnt, cnt);
         }
+        head = head->next;
     }
     if (actual_chunk == NULL)
     {
@@ -842,6 +845,9 @@ void *alloc_phys_pages(unsigned int cnt) {
     {
         prev_chunk->next = actual_chunk->next;
     }
+
+    // clean page in here
+    memset((void*)actual_chunk, 0, cnt * PAGE_SIZE);
     return (void*) actual_chunk;
 }
 

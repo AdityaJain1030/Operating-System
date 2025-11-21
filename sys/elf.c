@@ -5,6 +5,7 @@
 
 */
 
+#include <stddef.h>
 #ifdef ELF_TRACE
 #define TRACE
 #endif
@@ -195,17 +196,19 @@ int elf_load(struct uio* uio, void (**eptr)(void)) {
         if (phdr.p_flags & PF_R) program_rwxug |= PTE_R;
         if (phdr.p_flags & PF_W) program_rwxug |= PTE_W;
         if (phdr.p_flags & PF_X) program_rwxug |= PTE_X;
-        alloc_and_map_range((uintptr_t)phdr.p_vaddr, (size_t)phdr.p_memsz, program_rwxug); //yeah just make sure sstatus.SUM is on for this next part
+        void* addr = alloc_and_map_range((uintptr_t)phdr.p_vaddr, (size_t)phdr.p_memsz, PTE_W); //yeah just make sure sstatus.SUM is on for this next part
 
 
         //char * vaddr = (char *) phdr.p_vaddr;
-        memset((void *)phdr.p_vaddr, 0, phdr.p_memsz); //we want a clear slate for 
+        // elf should not bear responsibility of cleaning the page thats allocs job
+        // memset((void *)phdr.p_vaddr, 0, phdr.p_memsz); //we want a clear slate for 
 
         pos = phdr.p_offset;
         if (uio_cntl(uio, FCNTL_SETPOS, &pos)<0) return -ENOTSUP;
         retval  = uio_read(uio, (void *)phdr.p_vaddr, phdr.p_filesz);
-        //if (retval< 0) return -ENOTSUP;
 
+        set_range_flags((void *)phdr.p_vaddr, (size_t)phdr.p_memsz, program_rwxug);
+        //if (retval< 0) return -ENOTSUP;
     }
 
     
