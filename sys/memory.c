@@ -542,29 +542,10 @@ void *map_page(uintptr_t vma, void *pp, int rwxug_flags) {
         panic("mapping to kernel, we should not do this");
         // directly accessed using ppn. Technically we should not be remapping kernel. Please error here
     }
+
     // WE ARE IN USER SPACE
-
-
-    // brother what is this use the macros
-
-    // uintptr_t   pt2_pma = (csrr_satp() << 20) >> 8;
-    // struct pte*  pt2 = (struct pte*)pt2_pma;
-
     //deet impl, using functions to make it more readable
     struct pte* pt2 = active_space_ptab();
-    // uintptr_t   pt1_ppn = pt2[VPN2(vma)].ppn;
-    // uintptr_t pt1_pma = pt1_ppn << 12;
-    // struct pte* pt1 = (struct pte*) pt1_pma;
-    // uintptr_t pt0_ppn = pt1[VPN1(vma)].ppn;
-    // uintptr_t pt0_pma = pt0_ppn << 12;
-    // struct pte* pt0 = (struct pte*) pt0_pma;
-
-    uintptr_t   pt1_ppn;
-    uintptr_t pt1_pma;
-    struct pte* pt1;
-    uintptr_t pt0_ppn = pt1[VPN1(vma)].ppn;
-    uintptr_t pt0_pma = pt0_ppn << 12;
-    struct pte* pt0 = (struct pte*) pt0_pma;
 
     // check if invalid first
     if (!PTE_VALID(pt2[VPN2(vma)]))
@@ -579,15 +560,15 @@ void *map_page(uintptr_t vma, void *pp, int rwxug_flags) {
         pt2[VPN2(vma)] = ptab_pte((struct pte*)newpage, 0);
     }
     
-    // get the next level
-    pt1_ppn = pt2[VPN2(vma)].ppn;
-    pt1_pma = pt1_ppn << 12;
-    pt1 = (struct pte*) pt1_pma;
+    // get the next level (keeping as much convention from alex as possible)
+    // to make his debugging easier
+    uintptr_t pt1_ppn = pt2[VPN2(vma)].ppn;
+    struct pte *pt1 = (struct pte*)pageptr(pt1_ppn);
 
     if (!PTE_VALID(pt1[VPN1(vma)]))  // check if entry in page table 1 is valid (page exists for it i.e. subable 0 exists, otherwise allcoate)
     {
         uintptr_t temp = (uintptr_t) alloc_phys_page(); // allocates one page. Temp is pointer to start of that page which will be our l0 subtablw
-        
+    
         // forgot which part does page cleaning (cleanup or setup)
         // so for good measure we do it here
         memset((void *)temp, 0, PAGE_SIZE);
@@ -595,9 +576,11 @@ void *map_page(uintptr_t vma, void *pp, int rwxug_flags) {
         pt1[VPN1(vma)] = ptab_pte((struct pte*) temp, PTE_G & rwxug_flags);        // sets/creates it
     }
 
-    pt0_ppn = pt1[VPN1(vma)].ppn;
-    pt0_pma = pt0_ppn << 12;
-    pt0 = (struct pte*) pt0_pma;
+    // get ppn for the 0 page
+    uintptr_t pt0_ppn = pt1[VPN2(vma)].ppn;
+    struct pte *pt0 = (struct pte*)pageptr(pt0_ppn);
+
+    // what do we do if pt0 is already valid?
 
     pt0[VPN0(vma)] = leaf_pte(pp, rwxug_flags);
 
