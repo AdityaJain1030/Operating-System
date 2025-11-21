@@ -18,6 +18,7 @@
 #include "filesys.h"
 #include "heap.h"
 #include "intr.h"
+#include "process.h"
 #include "string.h"
 #include "thread.h"
 #include "timer.h"
@@ -46,16 +47,21 @@ void main(void) {
     console_init();
     intrmgr_init();
     devmgr_init();
+    memory_init();
     thrmgr_init();
-    heap_init(_kimg_end, RAM_END);
+    procmgr_init();
+    // heap_init(_kimg_end, RAM_END);
 
     attach_devices();
 
     enable_interrupts();
     ramdisk_attach();
 
+    // struct uio *trek;
+    // int err = open_file(const char *mpname, const char *flname, struct uio **uioptr)
     mount_cdrive();
     run_init();
+
 }
 
 void attach_devices(void) {
