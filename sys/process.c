@@ -94,6 +94,18 @@ int process_exec(struct uio* exefile, int argc, char** argv) {
 
     // just look at slides 17 Ill come back to these to fix comments
 
+    // we load it once to test against any issues with the elf, we dont want
+    // to unmap the memory space if we dont
+    // have a valid elf?
+    // since we reset our memory space this will get cleaned up anyway
+    void (*dummy)();
+    int err = elf_load(exefile, &dummy);
+    if (err < 0) {
+        // our elf is bad
+        uio_close(exefile); 
+        return err;
+    }
+
     // 2. create new page
     void* newpage = alloc_phys_page();
 
@@ -110,10 +122,12 @@ int process_exec(struct uio* exefile, int argc, char** argv) {
     reset_active_mspace();
     
     // move this down here per slides 17
-    void (*entry_ptr)(); // taken from main i need to learn how elf works still.....
     // 1. load an elf
-    int err = elf_load(exefile, &entry_ptr);
-    uio_close(exefile); 
+    void (*entry_ptr)(); // taken from main i need to learn how elf works still.....
+    err = elf_load(exefile, &entry_ptr);
+    uio_close(exefile);
+
+    // i dont think we need this since we already tested the elf above
     if (err < 0) {
         free_phys_page(newpage);
         return err;
