@@ -1,4 +1,4 @@
-/*! @file ktfs.h‌‌‍‍‌‍⁠‌‌​‌‌‌⁠‍‌‌​⁠‍‌‌‌‍​⁠‍‌‌‍⁠​‌‌‍‌​⁠​‍‌‌‌‌‌⁠‍‍‌​⁠⁠‌‌‌​‌​‌‍‌‍‌‍‌‌‍‍​⁠​⁠‌​‍‍‌⁠‌‍‌‍‌​‌‌‍​‌​​‍‌‍‌‍‌​⁠‍‌​‌​‌‍‌⁠​⁠⁠‌
+/*! @file ktfs.h‌‌‍‍‌‍⁠‌‌​‌‌‌⁠‍‌‌​⁠‍‌‌‌‍​⁠‍‌‌‍⁠​‌‌‍‌​⁠​‍‌‌‌‌‌⁠‍‍‌​⁠⁠‌‌‌​‌​‌‍‌‍‌‍‌‌‍‍​⁠​⁠‌​‍‍‌⁠‌‍‌‍‌​‌‌‍​‌​​‍‌‍‌‍‌​⁠‍‌‌‌​‌‍‍⁠​⁠⁠‌
     @brief KTFS Header File.
     @copyright Copyright (c) 2024-2025 University of Illinois
 
@@ -7,6 +7,10 @@
 #include <stdint.h>
 
 #include "uioimpl.h"
+
+#define KTFS_NUM_INODES_IN_BLOCK (KTFS_BLKSZ / KTFS_INOSZ)
+#define KTFS_NUM_DENTRY_IN_BLOCK (KTFS_BLKSZ / KTFS_DENSZ)
+
 
 #define KTFS_BLKSZ 512
 #define KTFS_INOSZ 32
@@ -20,6 +24,9 @@
      KTFS_NUM_INDIRECT_BLOCKS * (KTFS_BLKSZ / sizeof(uint32_t)) * KTFS_BLKSZ + \
      KTFS_NUM_DINDIRECT_BLOCKS * (KTFS_BLKSZ / sizeof(uint32_t)) *             \
          (KTFS_BLKSZ / sizeof(uint32_t)) * KTFS_BLKSZ)
+
+#define KTFS_MAX_NUM_FILES (KTFS_MAX_FILE_SIZE / KTFS_DENSZ) 
+//this number is easily less than 2^32
 
 #define KTFS_FILE_IN_USE (1 << 0)
 #define KTFS_FILE_FREE (0 << 0)
