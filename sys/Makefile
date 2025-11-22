@@ -113,7 +113,11 @@ debug: kernel.elf
 ################################TEST_MAIN.C#################################
 
 # Add more test objects or test suites
-TEST_SUITE_OBJS = $(patsubst %.c,%.o,$(wildcard tests/testsuite_*.c)) tests/test_utils.o
+#TEST_SUITE_OBJS = $(patsubst %.c,%.o,$(wildcard tests/testsuite_*.c)) tests/test_utils.o
+TEST_SUITE_OBJS = \
+        tests/ktfs_highlevel_test_suite.o \
+        tests/vioblk_test_suite.o \
+        tests/cache_test_suite.o
 TEST_OBJS = $(TEST_SUITE_OBJS) $(OBJS)
 
 test-kernel.elf: $(TEST_OBJS) tests/test_main.o blob.o

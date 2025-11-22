@@ -3,13 +3,25 @@
     @copyright Copyright (c) 2024-2025 University of Illinois
 
 */  
+/* mkfs command
+../util/mkfs_ktfs ./ktfs.raw 16M 160 ../usr/games/* ../usr/random_text/*
+*/
 
-//todo list
+
+// high priority todo list
 /*
- * ask TA about nested mounts and multiple mountpoints
+ *
  * ask TA about negative return when no file is found on ktfs_open
  * figure out passing in NULL double pointers. If it isn't ok then change it everywhere and adjust guardcases
 */
+
+// low priority todo list
+/*
+ * multiple mountpoints
+ * ask TA about negative return when no file is found on ktfs_open
+ * legacy issue. figure out passing in NULL double pointers. If it isn't ok then change it everywhere and adjust guardcases
+*/
+
 
 #include <stddef.h>
 #include <stdint.h>
@@ -132,19 +144,31 @@ static const struct uio_intf initial_file_uio_intf = {
 //exactly what it sounds like
 //NOTE: db_blk_num is the DATA_BLOCK_INDEX of the block we're trying to free, not the absolute index like we've so often used for other function
 int ktfs_free_db_slot(struct cache* cache, uint32_t db_blk_num){
+    //void * blkptr;
+    //cache_get_block(cache, (db_blk_num/(KTFS_BLKSZ*sizeof(uint8_t))+ktfs->bitmap_block_start)*KTFS_BLKSZ, &blkptr);//its a bitmap u dingus YOURE A DUMBASSS WHY WOULD OYU USE SIZEOF HERE
+														   //pin of shame
+    //((struct ktfs_data_block*)blkptr)->data[(db_blk_num%(KTFS_BLKSZ*sizeof(uint8_t)))/sizeof(uint8_t)] |= 0x01<<(db_blk_num%sizeof(uint8_t));
+    //cache_release_block(cache, blkptr, 1);
+    //return 0;
+
     void * blkptr;
-    cache_get_block(cache, (db_blk_num/(KTFS_BLKSZ*sizeof(uint8_t))+ktfs->bitmap_block_start)*KTFS_BLKSZ, &blkptr);//its a bitmap u dingus
-    ((struct ktfs_data_block*)blkptr)->data[(db_blk_num%(KTFS_BLKSZ*sizeof(uint8_t)))/sizeof(uint8_t)] |= 0x01<<(db_blk_num%sizeof(uint8_t));
+	int abs_blk_of_bitmap = db_blk_num/(KTFS_BLKSZ*8)+ktfs->bitmap_block_start;
+    cache_get_block(cache, abs_blk_of_bitmap*KTFS_BLKSZ, &blkptr);
+	int index = (db_blk_num%(KTFS_BLKSZ*8))/8;
+	int offset = (db_blk_num%(KTFS_BLKSZ*8))%8;
+	if (((char *)blkptr)[index] & (0x01<<offset) == 0) kprintf("warning: decided to free a datablock that has already been freed");//comment out this line when its time to submit
+	((char *)blkptr)[index] &= ~(0x01<<offset);
     cache_release_block(cache, blkptr, 1);
     return 0;
 }
-
-//exactly what it sounds like
-//NOTE: inode_slot_num is the INODE index of the INODE we're trying to free, not the absolute index like we've so often used for other function
 int ktfs_free_inode_slot(struct cache* cache, uint32_t inode_slot_num){
     void * blkptr;
-    cache_get_block(cache, (inode_slot_num/(KTFS_BLKSZ*sizeof(uint8_t))+ktfs->bitmap_block_start)*KTFS_BLKSZ, &blkptr);//its a bitmap u dingus
-    ((struct ktfs_data_block*)blkptr)->data[(inode_slot_num%(KTFS_BLKSZ*sizeof(uint8_t)))/sizeof(uint8_t)] |= 0x01<<(inode_slot_num%sizeof(uint8_t));
+	int abs_blk_of_bitmap = inode_slot_num/(KTFS_BLKSZ*8)+ktfs->inode_bitmap_block_start;
+    cache_get_block(cache, abs_blk_of_bitmap*KTFS_BLKSZ, &blkptr);	
+	int index = (inode_slot_num%(KTFS_BLKSZ*8))/8;
+	int offset = (inode_slot_num%(KTFS_BLKSZ*8))%8;
+	if (((char *)blkptr)[index] & (0x01<<offset) == 0) kprintf("warning: decided to free an inode that has already been freed");//comment out this line when its time to submit
+	((char *)blkptr)[index] &= ~(0x01<<offset);
     cache_release_block(cache, blkptr, 1);
     return 0;
 }
@@ -161,7 +185,6 @@ int ktfs_free_inode_slot(struct cache* cache, uint32_t inode_slot_num){
 int ktfs_appender(struct cache* cache, struct ktfs_inode* inode, void * buf, int bytecnt, int op){ 
     trace("%s(cache=%p, inode=%p, bytecnt=%u)\n", __func__, cache, inode, bytecnt);
     struct ktfs_file * file_wrapper;
-    uint32_t * pos= NULL;
     uint16_t inode_num; //specifically the number of the inode (we already have the root directory inode number as well)
 
     //guard cases
@@ -172,14 +195,11 @@ int ktfs_appender(struct cache* cache, struct ktfs_inode* inode, void * buf, int
     if (op == F_APPEND_SETEND || op == F_APPEND_STORE){
         file_wrapper = (void *)inode - offsetof(struct ktfs_file, inode_data);
         if (file_wrapper->pos != inode->size) return -ENOTSUP; //Dawg I just told you, this function can only be called if we're at the end of the file
-        pos = &file_wrapper->pos;
         inode_num = file_wrapper->dentry.inode;
     }
     else if (op==F_APPEND_CREATE){
-        inode = &ktfs->root_directory_inode_data; //no filewrapper
-        //pos is always "end of file" so to speak for the root directory inode
-        int size = ktfs->root_directory_inode_data.size;
-        *pos = size;
+        //inode = &ktfs->root_directory_inode_data; //no filewrapper HOWEVER. WE CAN JUST PASS IN THE RDR COPY THAT WE KEEP INSIDE OF THE KTFS STRUCT
+		assert(inode = &ktfs->root_directory_inode_data); //as a matter of fact
         trace("size in appender: %d\n",ktfs->root_directory_inode_data.size);
         inode_num = ktfs->root_directory_inode;
         trace("inode number: %d\n", inode_num);
@@ -187,23 +207,22 @@ int ktfs_appender(struct cache* cache, struct ktfs_inode* inode, void * buf, int
 
 
     //ensures that we don't somehow exceed the maximum filesize
-    bytecnt = MIN(bytecnt, KTFS_MAX_FILE_SIZE - *pos);
+    bytecnt = MIN(bytecnt, KTFS_MAX_FILE_SIZE - inode->size);
 
 
     int nstored = 0;
     void * blkptr;
     while (nstored < bytecnt){
-        trace("*pos = %d\n", *pos);
         int allocated_index = -1;
-        if (*pos % KTFS_BLKSZ == 0) {
-            trace("*pos = %d\n", *pos);
-            allocated_index = ktfs_alloc_datablock(cache, inode, *pos/KTFS_BLKSZ); //in ANY case where pos is exactly a multiple of blksz, that means we're at the beginning of a new block
+        if (inode->size % KTFS_BLKSZ == 0) {
+            allocated_index = ktfs_alloc_datablock(cache, inode, inode->size/KTFS_BLKSZ); //in ANY case where pos is exactly a multiple of blksz, that means we're at the beginning of a new block
             if (allocated_index <0){
-                trace("alloc_datablock returned a negative value\n");
+                kprintf("alloc_datablock returned a negative value: %s\n", error_name(allocated_index));
                 return allocated_index;
             }//should always allocate in this case
+			kprintf("allocated_index: %d\n", allocated_index);
         }
-        if (allocated_index == -1) allocated_index = ktfs_get_block_absolute_idx(cache, inode, *pos/KTFS_BLKSZ); // alloc_index = -1 by the end of this that means we didn't have to allocate a new block for the operation
+        if (allocated_index == -1) allocated_index = ktfs_get_block_absolute_idx(cache, inode, inode->size/KTFS_BLKSZ); // alloc_index = -1 by the end of this that means we didn't have to allocate a new block for the operation
         int n_per_cycle = MIN(KTFS_BLKSZ, bytecnt - nstored);
         //actual store part
         if (cache_get_block(cache, allocated_index*KTFS_BLKSZ, &blkptr)<0){// (can make this a noop for setend and operations on the root directory inode, although that's a pretty trivial optimization)
@@ -217,10 +236,12 @@ int ktfs_appender(struct cache* cache, struct ktfs_inode* inode, void * buf, int
 
         //increment values
         nstored += n_per_cycle;
-        *pos += n_per_cycle;
-        if (op != F_APPEND_CREATE) inode->size += n_per_cycle; //because for "create" there is no filewrapper, and the pos itsself points to size
+        //*pos += n_per_cycle;//do this at the end
+		inode->size +=n_per_cycle;
+        //if (op != F_APPEND_CREATE) inode->size += n_per_cycle; //because for "create" there is no filewrapper, and the pos itsself points to size
 
     }
+	if (op != F_APPEND_CREATE) file_wrapper->pos = inode->size;
 
     //cache_get_block(ktfs_inst->cache_ptr, (ktfs_inst->root_directory_inode/KTFS_NUM_INODES_IN_BLOCK), &blkptr);
     //struct ktfs_inode* rdr = (struct ktfs_inode*)blkptr + (ktfs->root_directory_inode%KTFS_NUM_INODES_IN_BLOCK);
@@ -229,6 +250,7 @@ int ktfs_appender(struct cache* cache, struct ktfs_inode* inode, void * buf, int
     //in this current impementation, we perform a DEEP COPY so that the file metadata persists in the filesystem
     //we do this at the end because doing in every loop would be abysmal TODO: maybe it is required in every loop though
     trace("inode_num: %d\n", inode_num);
+
     if (cache_get_block(cache, ((inode_num/KTFS_NUM_INODES_IN_BLOCK)+ktfs->inode_block_start)*KTFS_BLKSZ, &blkptr)< 0){
         trace("cache_get_block returned a negative value\n");
         return -EINVAL;
@@ -244,7 +266,7 @@ int ktfs_appender(struct cache* cache, struct ktfs_inode* inode, void * buf, int
 * @ brief: 
 * @ parameters: 
 * @ return: (for convience) the absolute index of the 
-* NOTE: THIS DOESN"T HAVE ANY SIDE EFFECT ON THE FILE SIZE
+* NOTE: THIS DOESN'T HAVE ANY SIDE  0 ../util/mkfs_ktfs ./ktfs.raw 16M 160 ../usr/games/* ../usr/random_text/* EFFECT ON THE FILE SIZE
 */
 int ktfs_alloc_datablock(struct cache* cache, struct ktfs_inode * inode, uint32_t contiguous_db_to_alloc){
     kprintf("%s(cache=%p, inode=%p, contiguous_db_to_alloc=%u)\n", __func__, cache, inode, contiguous_db_to_alloc);
@@ -802,8 +824,8 @@ long ktfs_store(struct uio* uio, const void* buf, unsigned long len) {
         firstlen = file->inode_data.size - file->pos;
         secondlen = len - firstlen;
     } 
-    trace("firstlen: %d\n", firstlen);
-    trace("secondlen: %d\n", secondlen);
+    kprintf("firstlen: %d\n", firstlen);
+    kprintf("secondlen: %d\n", secondlen);
     
 
     if (!file->opened) return -EINVAL;
@@ -815,7 +837,7 @@ long ktfs_store(struct uio* uio, const void* buf, unsigned long len) {
 
     //case one: overwriting the file
     while (nstored < firstlen){
-        //if (firstlen == 0) trace("null entry");
+        if (firstlen == 0) kprintf("null entry\n");
         nwritten = MIN(KTFS_BLKSZ - file->pos%KTFS_BLKSZ, firstlen - nstored); //chooses between the didtance btween the pos and the next block, or whatevers left to fetch
         
         absolute_idx = ktfs_get_block_absolute_idx(ktfs->cache_ptr, &file->inode_data, file->pos/KTFS_BLKSZ);
@@ -842,6 +864,9 @@ long ktfs_store(struct uio* uio, const void* buf, unsigned long len) {
     //second case: append to end
 
     nstored += ktfs_appender(ktfs->cache_ptr, &file->inode_data, (char*)buf+nstored, secondlen, F_APPEND_STORE); //keep in mind that this will return 0 if second len is 0
+	kprintf("file data after store:\n");
+	kprintf("file size: %d", &file->inode_data.size);
+
     trace("possibly another append issue?");
     return nstored; 
 }
@@ -862,7 +887,10 @@ int ktfs_create(struct filesystem* fs, const char* name) {
     void * blkptr;
     
     if (!fs || !name) return -EINVAL;
-    if (strlen(name) > KTFS_MAX_FILENAME_LEN) return -ENOTSUP;
+    if (strlen(name) > KTFS_MAX_FILENAME_LEN) {
+		trace("file name is too big");
+		return -ENOTSUP;
+	}
     //trace("ktfs->max_inode_count in ktfs create: %d\n", ktfs->max_inode_count);
     //trace("ktfs_inst->root_directory_inode_data.size: %d and ktfs_inst->max_inode_count: %d\n", ktfs_inst->root_directory_inode_data.size/KTFS_DENSZ, ktfs_inst->max_inode_count);
     if (ktfs_inst->root_directory_inode_data.size/KTFS_DENSZ >= ktfs_inst->max_inode_count){
