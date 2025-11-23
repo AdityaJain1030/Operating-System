@@ -985,6 +985,8 @@ int ktfs_create(struct filesystem* fs, const char* name) {
  */
 int ktfs_delete(struct filesystem* fs, const char* name) {
 
+    return -ENOTSUP;
+    
     trace("%s(fs: %p, name :%s)\n",__func__, fs, name);
 
     if (!fs || !name) return -EINVAL;

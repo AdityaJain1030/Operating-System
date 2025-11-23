@@ -23,7 +23,7 @@
 #include "thread.h"
 #include "timer.h"
 
-#define INITEXE "hello"  // FIXME
+#define INITEXE "zork"  // FIXME
 
 // INITEXE: Controls the kernel program
 
