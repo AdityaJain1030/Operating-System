@@ -117,12 +117,15 @@ void handle_umode_exception(unsigned int cause, struct trap_frame* tfr) {
     if (name != NULL) {
         switch (cause) {
             case RISCV_SCAUSE_ECALL_FROM_UMODE:
+                // handle syscall first
                 handle_syscall(tfr);
                 return;
             case RISCV_SCAUSE_LOAD_PAGE_FAULT:
-                if (handle_umode_page_fault(tfr, csrr_stval())) return;
+                // fall through into the other page faulr
             case RISCV_SCAUSE_STORE_PAGE_FAULT:
+                // if the page fault is not handled we can fall through to fail
                 if (handle_umode_page_fault(tfr, csrr_stval())) return;
+            // NOTE: THESE ALL FALL THROUGH
             case RISCV_SCAUSE_INSTR_PAGE_FAULT:
                 // if (handle_umode_page_fault(tfr, csrr_stval())) return;
             case RISCV_SCAUSE_LOAD_ADDR_MISALIGNED:
@@ -143,7 +146,7 @@ void handle_umode_exception(unsigned int cause, struct trap_frame* tfr) {
     
     kprintf("%s\n", msgbuf);
     
-    // switch back to thread before exiting
+    // switch back to thread before exiting, this probablu does not work
     asm volatile("mv tp, %0" : : "r"(tfr->tp));
     process_exit();
     return;

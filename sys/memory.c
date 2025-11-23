@@ -695,9 +695,12 @@ int validate_vptr(const void *vp, size_t len, int rwxu_flags) {
     //      we return an error
     //      other wise we are good
 
-    // LXDL: 11/22/26 8:22 PM Added Null check
-    if (len == 0 || vp == NULL) return 0; // validate 0 bytes
-    
+    if (len == 0) return 0; // validate 0 bytes
+    if (vp == NULL) return -EINVAL;
+
+    // we should not let ourselves shoot ourselves in the foot and call this with G
+    if (rwxu_flags & PTE_G) return -EINVAL;
+
     uintptr_t range_begin = (uintptr_t)vp; // uintptrs are much nicer to work with :)
     uintptr_t range_end = range_begin + len;
 
@@ -729,8 +732,14 @@ int validate_vptr(const void *vp, size_t len, int rwxu_flags) {
 
         //validity checks
         if (!PTE_VALID(pte2)) return -EINVAL; // invalid pte
-        if (PTE_LEAF(pte2) && ((rwxu_flags & pte2.flags) == 0)) return -EINVAL; // we cannot access this pte
-        if (PTE_LEAF(pte2) && ((rwxu_flags & pte2.flags) != 0)) continue; // valid pte gigapage, go next
+        // if we are a leaf node, check if we are allowed to access it. If not, we return -EINVAL
+        if (PTE_LEAF(pte2))
+        {
+            if ((rwxu_flags & pte2.flags) == rwxu_flags) continue;
+            return -EINVAL;
+        }
+        // if (PTE_LEAF(pte2) && ((rwxu_flags & pte2.flags) != rwxu_flags)) return -EINVAL; // we cannot access this pte
+        // if (PTE_LEAF(pte2) && ((rwxu_flags & pte2.flags) == rwxu_flags)) continue; // valid pte gigapage, go next
 
         // checking root level 1 page table
         struct pte *lvl_1_root = pageptr(pte2.ppn);
@@ -738,8 +747,14 @@ int validate_vptr(const void *vp, size_t len, int rwxu_flags) {
 
         //validity checks
         if (!PTE_VALID(pte1)) return -EINVAL; // invalid pte
-        if (PTE_LEAF(pte1) && ((rwxu_flags & pte1.flags) == 0)) return -EINVAL; // we cannot access this pte
-        if (PTE_LEAF(pte1) && ((rwxu_flags & pte1.flags) != 0)) continue; // valid pte megapage, go next
+        // if we are a leaf node, check if we are allowed to access it. If not, we return -EINVAL
+        if (PTE_LEAF(pte1))
+        {
+            if ((rwxu_flags & pte1.flags) == rwxu_flags) continue;
+            return -EINVAL;
+        }
+        // if (!PTE_LEAF(pte1) && ((rwxu_flags & pte1.flags) != rwxu_flags)) return -EINVAL; // we cannot access this pte
+        // if (PTE_LEAF(pte1) && ((rwxu_flags & pte1.flags) == rwxu_flags)) continue; // valid pte megapage, go next
 
         // checking root level 0 page table
         struct pte *lvl_0_root = pageptr(pte1.ppn);
@@ -748,7 +763,7 @@ int validate_vptr(const void *vp, size_t len, int rwxu_flags) {
         //validity checks
         if (!PTE_VALID(pte0)) return -EINVAL; // invalid pte
         if (!PTE_LEAF(pte0)) return -EINVAL; // all nodes are leaf here
-        if (((rwxu_flags & pte0.flags) == 0)) return -EINVAL; // we cannot access this pte
+        if (((rwxu_flags & pte0.flags) != rwxu_flags)) return -EINVAL; // we cannot access this pte with all desired flags
     }
 
     return 0;

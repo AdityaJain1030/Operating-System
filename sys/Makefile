@@ -133,6 +133,6 @@ original-main-kernel.elf: $(OBJS) original_main.o blob.o
 run-original-main-test: original-main-kernel.elf
 	$(QEMU) $(QEMUOPTS) -m 8M -kernel $<
 
-debug: kernel.elf
-	$(QEMU) $(QEMUOPTS) -m 8M -kernel $< $(QEMUDEBUG)
+# debug: kernel.elf
+# 	$(QEMU) $(QEMUOPTS) -m 8M -kernel $< $(QEMUDEBUG)
 
