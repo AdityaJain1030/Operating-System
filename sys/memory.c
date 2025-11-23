@@ -695,8 +695,9 @@ int validate_vptr(const void *vp, size_t len, int rwxu_flags) {
     //      we return an error
     //      other wise we are good
 
-    if (len == 0) return 0; // validate 0 bytes
-
+    // LXDL: 11/22/26 8:22 PM Added Null check
+    if (len == 0 || vp == NULL) return 0; // validate 0 bytes
+    
     uintptr_t range_begin = (uintptr_t)vp; // uintptrs are much nicer to work with :)
     uintptr_t range_end = range_begin + len;
 
@@ -706,7 +707,7 @@ int validate_vptr(const void *vp, size_t len, int rwxu_flags) {
     // I feel very smart
     if (range_end < range_begin) return -EINVAL; // we overflowed... 
 
-    if (wellformed(range_begin) != 1) return -EINVAL; // checks for 10.4.1 in riscv manual II
+    if (wellformed(range_begin) != 1) return -EINVAL; // checks for 12.4.1 in riscv manual II
 
     struct pte *lvl_2_root = active_space_ptab();
 
