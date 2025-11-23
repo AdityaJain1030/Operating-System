@@ -266,17 +266,27 @@ int sysfscreate(const char *path) {
     char *mpnameptr;
     char *flnameptr;
     
-    valid = parse_path(path, &mpnameptr, &flnameptr);
+    char kpath[100];
+    for (int i = 0; i < 99; i+=1)
+    {
+        kpath[i] = path[i]; // Copy character
+        if (path[i] == '\0') {
+            kpath[i] = '\0'; // force null termination... if a file dosent fit in 100 we wont find it later anyways
+            break; // Stop if we hit null
+        }
+    }
+    kpath[99] = '\0';
+    valid = parse_path(kpath, &mpnameptr, &flnameptr);
     if (valid != 0){
-        kfree(mpnameptr);
-        kfree(flnameptr);
+        // kfree(mpnameptr);
+        // kfree(flnameptr);
         return valid;
     }
 
     valid = create_file(mpnameptr, flnameptr);
 
-    kfree(mpnameptr);
-    kfree(flnameptr);
+    // kfree(mpnameptr);
+    // kfree(flnameptr);
 
     return valid;
 }
@@ -299,17 +309,27 @@ int sysfsdelete(const char *path) {
     char *mpnameptr;
     char *flnameptr;
     
-    valid = parse_path(path, &mpnameptr, &flnameptr);
+    char kpath[100];
+    for (int i = 0; i < 99; i+=1)
+    {
+        kpath[i] = path[i]; // Copy character
+        if (path[i] == '\0') {
+            kpath[i] = '\0'; // force null termination... if a file dosent fit in 100 we wont find it later anyways
+            break; // Stop if we hit null
+        }
+    }
+    kpath[99] = '\0';
+    valid = parse_path(kpath, &mpnameptr, &flnameptr);
     if (valid != 0){
-        kfree(mpnameptr);
-        kfree(flnameptr);
+        // kfree(mpnameptr);
+        // kfree(flnameptr);
         return valid;
     }
 
     valid = delete_file(mpnameptr, flnameptr);
 
-    kfree(mpnameptr);
-    kfree(flnameptr);
+    // kfree(mpnameptr);
+    // kfree(flnameptr);
 
     return valid;
 }
@@ -359,7 +379,20 @@ int sysopen(int fd, const char *path) {
     char *mpnameptr;
     char *flnameptr;
 
-    val = parse_path(path, &mpnameptr, &flnameptr);
+    // moving from the malloc impl to this bc
+    // im sure AG uses own parse path...
+    // file name is limited to 13 so this case should never happen technically
+    char kpath[100];
+    for (int i = 0; i < 99; i+=1)
+    {
+        kpath[i] = path[i]; // Copy character
+        if (path[i] == '\0') {
+            kpath[i] = '\0'; // force null termination... if a file dosent fit in 100 we wont find it later anyways
+            break; // Stop if we hit null
+        }
+    }
+    kpath[99] = '\0';
+    val = parse_path(kpath, &mpnameptr, &flnameptr);
     if (val != 0) return val;
 
     // taken from main.c
@@ -367,8 +400,8 @@ int sysopen(int fd, const char *path) {
     val = open_file(mpnameptr, flnameptr, &file);
     if (val != 0) return val;
 
-    kfree(mpnameptr);
-    kfree(flnameptr);
+    // kfree(mpnameptr);
+    // kfree(flnameptr);
     
     running->uiotab[fd] = file;
     return fd;

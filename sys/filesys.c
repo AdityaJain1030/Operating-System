@@ -311,7 +311,7 @@ void nullfs_flush(struct filesystem* fs __attribute__((unused))) {
  * @param flnameptr pointer to which the file name will be stored
  * @return 0 on success, -EINVAL on invalid arguments.
  */
-int parse_path(const char* path, char** mpnameptr, char** flnameptr) {
+int parse_path(char* path, char** mpnameptr, char** flnameptr) {
     // FIXME
     if (path == NULL) return -EINVAL;
     if (mpnameptr == NULL) return -EINVAL;
@@ -319,7 +319,7 @@ int parse_path(const char* path, char** mpnameptr, char** flnameptr) {
 
     char *dash = strchr(path, '/');
 
-    int path_len = strlen(path);
+    // int path_len = strlen(path);
     if (dash == NULL)
     {
         // this means our whole string is the path
@@ -327,27 +327,29 @@ int parse_path(const char* path, char** mpnameptr, char** flnameptr) {
         // nonexistent paths here that is the file
         // systems job
 
-        // *mpnameptr = path; // this is a bit cooked
+        *mpnameptr = path; // this is a bit cooked
+        flnameptr = NULL;
         // ok that was giving me a warning lets just strcpy
-        *mpnameptr = kmalloc(path_len);
-        strncpy(*mpnameptr, path, path_len);
+        // *mpnameptr = kmalloc(path_len);
+        // strncpy(*mpnameptr, path, path_len);
         return 0;
     }
     // split at the first /, all subsequent dashes are assumed to be
     // part at file name
-    void *mpnamestart = (void*) path;
-    void *flnamestart = (void*)((uintptr_t)dash + 1);
+    *mpnameptr = (void*) path;
+    *flnameptr = (void*)((uintptr_t)dash + 1);
 
     unsigned long mpname_len = (uintptr_t) dash - (uintptr_t) path;
-    unsigned long flname_len = path_len - mpname_len;
+    // unsigned long flname_len = path_len - mpname_len;
 
-    *mpnameptr = kmalloc(mpname_len + 1); // add null terminator
-    *flnameptr = kmalloc(flname_len);
+    // *mpnameptr = kmalloc(mpname_len + 1); // add null terminator
+    // *flnameptr = kmalloc(flname_len);
 
-    strncpy(*mpnameptr, mpnamestart, mpname_len);
+    // strncpy(*mpnameptr, mpnamestart, mpname_len);
+    
     (*mpnameptr)[mpname_len] = '\0'; // add null terminator
 
-    strncpy(*flnameptr, flnamestart, flname_len);
+    // strncpy(*flnameptr, flnamestart, flname_len);
     
     return 0;
 }
