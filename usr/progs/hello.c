@@ -15,6 +15,14 @@
     //     kprintf("This is c: %d\n", c);
 
     // }
+
+    // test function 
+
+    void main(int argc, char** argv)
+    {
+
+        return 0;
+    }
 #endif
 
 #ifdef UMODE // cp2&3
