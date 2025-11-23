@@ -69,7 +69,7 @@ void main(void) {
 
     enable_interrupts();
 
-    //run_vioblk_tests();
+    run_vioblk_tests();
 
     mount_cdrive();
 
