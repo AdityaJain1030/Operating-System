@@ -1,1 +1,1 @@
-../util/mkfs_ktfs ../sys/ktfs.raw 8M 16 bin/*
+../util/mkfs_ktfs ../sys/ktfs.raw 8M 16 bin/* ../util/docs.txt

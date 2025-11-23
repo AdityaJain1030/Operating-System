@@ -414,8 +414,8 @@ long sysread(int fd, void *buf, size_t bufsz) {
     struct process *running = current_process();
     if (running->uiotab[fd] == NULL) return -ENOENT;
 
-    // check buf
-    if (validate_vptr(buf, bufsz, PTE_U | PTE_R) != 0) return -EINVAL;
+    // check buf, we only care if we can WRITE to it
+    if (validate_vptr(buf, bufsz, PTE_U | PTE_W) != 0) return -EINVAL;
 
     return uio_read(running->uiotab[fd], buf, bufsz);
 }
@@ -437,8 +437,8 @@ long syswrite(int fd, const void *buf, size_t len) {
     struct process *running = current_process();
     if (running->uiotab[fd] == NULL) return -ENOENT;
 
-    // check buf
-    if (validate_vptr(buf, len, PTE_U | PTE_W) != 0) return -EINVAL;
+    // check buf we only care if we can READ to it
+    if (validate_vptr(buf, len, PTE_U | PTE_R) != 0) return -EINVAL;
 
     return uio_write(running->uiotab[fd], buf, len);
 }
