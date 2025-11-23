@@ -159,7 +159,7 @@ int sysexec(int fd, int argc, char **argv) {
     
     // check if args are valid, we also do a nullptr check here and let a
     // null argv slide for now...
-    if (argv != NULL && validate_vptr(argv, sizeof(char*) * (argc+1), PTE_U | PTE_X | PTE_R) != 0) return -EINVAL;
+    if (argv != NULL && validate_vptr(argv, sizeof(char*) * (argc+1), PTE_U | PTE_W | PTE_R) != 0) return -EINVAL;
 
     for (int i = 0; i < argc; i++)
     {
