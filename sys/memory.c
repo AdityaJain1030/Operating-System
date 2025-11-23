@@ -791,7 +791,7 @@ int validate_vstr(const char *vs, int rug_flags) {
         {
             // we just check till the next block, setting len to 1 is sufficient to check the
             // whole page
-            if (!validate_vptr(vs, 1, rug_flags)) return -EINVAL; // this block is invalid
+            if (validate_vptr(vs, 1, rug_flags) != 0) return -EINVAL;
             range_begin = (uintptr_t)vs; // uintptrs are much nicer to work with :)
             curr_end = VMA(VPN(range_begin) + 1); // hack
 
