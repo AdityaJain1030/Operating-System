@@ -157,11 +157,15 @@ int sysexec(int fd, int argc, char **argv) {
     if (fd < 0) return -EBADFD;
     if (fd >= PROCESS_UIOMAX) return -EBADFD;
     
-    // check if args are valid
-    if (validate_vptr(argv, sizeof(char*) * (argc+1), PTE_U | PTE_X | PTE_R) != 0) return -EINVAL;
+    // check if args are valid, we also do a nullptr check here and let a
+    // null argv slide for now...
+    if (argv != NULL && validate_vptr(argv, sizeof(char*) * (argc+1), PTE_U | PTE_X | PTE_R) != 0) return -EINVAL;
 
     for (int i = 0; i < argc; i++)
     {
+        // if (argv == NULL) continue;
+        // if (validate_vptr(argv, 1, PTE_U | PTE_X | PTE_R) != 0) return -EINVAL;
+        //  REGARDING NULL CASE (you must pass in argc = 0 for argv = null to work)
         if (validate_vstr(argv[i], PTE_R | PTE_W | PTE_U) != 0) return -EINVAL;
     }
 
@@ -214,7 +218,7 @@ int syswait(int tid) {
 int sysprint(const char *msg) {
     // check if string is valid vmem address
     // print
-    int valid = validate_vstr(msg, PTE_U);
+    int valid = validate_vstr(msg, PTE_U | PTE_R);
     if (valid != 0) return valid; // return invalid reason
    
     //print
@@ -256,7 +260,7 @@ int sysfscreate(const char *path) {
     // validate path
     // parse the path
     // call ktfs to create the file
-    int valid = validate_vstr(path, PTE_U);
+    int valid = validate_vstr(path, PTE_U | PTE_R);
     if (valid != 0) return valid;
     
     char *mpnameptr;
@@ -289,7 +293,7 @@ int sysfsdelete(const char *path) {
     // validate path
     // parse the path
     // call ktfs to delete the file
-    int valid = validate_vstr(path, PTE_U);
+    int valid = validate_vstr(path, PTE_U | PTE_R);
     if (valid != 0) return valid;
     
     char *mpnameptr;
@@ -323,7 +327,7 @@ int sysopen(int fd, const char *path) {
     // check if the fd is valid
     // then check if path is valid
     // then if the fd is valid we can create it
-    
+
     // fd check
     if (fd < -1) return -EBADFD;
     if (fd >= PROCESS_UIOMAX) return -EBADFD;
@@ -457,7 +461,7 @@ int sysfcntl(int fd, int cmd, void *arg) {
     if (running->uiotab[fd] == NULL) return -ENOENT;
 
     // idk how much of arg to validate so im just gonna put this here fornow
-    if (validate_vptr(arg, sizeof(unsigned long long), PTE_U | PTE_R) != 0) return -EINVAL;
+    if (validate_vptr(arg, sizeof(unsigned long long), PTE_U | PTE_R | PTE_W) != 0) return -EINVAL;
 
     return uio_cntl(running->uiotab[fd], cmd, arg);
 

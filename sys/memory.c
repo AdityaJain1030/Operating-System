@@ -702,7 +702,7 @@ int validate_vptr(const void *vp, size_t len, int rwxu_flags) {
     if (rwxu_flags & PTE_G) return -EINVAL;
 
     uintptr_t range_begin = (uintptr_t)vp; // uintptrs are much nicer to work with :)
-    uintptr_t range_end = range_begin + len;
+    uintptr_t range_end = range_begin + len - 1;
 
     // we need a way to check to see if len ended up subtracting from 
     // range_begin due to overflow, so we just check if range_end < range_begin
@@ -718,7 +718,7 @@ int validate_vptr(const void *vp, size_t len, int rwxu_flags) {
     unsigned long page_start = VPN(range_begin); // get page NUM the addr belongs to (alignment)
     unsigned long page_end = VPN(range_end);// get page NUM the addr+len belongs to (alignment)
 
-    for (unsigned long i = page_start; i < page_end; i++)
+    for (unsigned long i = page_start; i <= page_end; i++)
     {
         uintptr_t page_aligned_vma  = VMA(i); // get vma for page
 
@@ -784,6 +784,8 @@ int validate_vstr(const char *vs, int rug_flags) {
     
     if (validate_vptr(vs, 1, rug_flags) != 0) return -EINVAL;
     // if (*vs == '\0') return 0;
+    // null check
+    if (*vs == '\0') return 0;
 
     for (;;)
     {
