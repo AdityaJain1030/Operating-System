@@ -207,7 +207,7 @@ int ktfs_appender(struct cache* cache, struct ktfs_inode* inode, void * buf, int
     int nstored = 0;
     void * blkptr;
     while (nstored < bytecnt){
-        int allocated_index = -1;
+        int allocated_index;
         if (inode->size % KTFS_BLKSZ == 0) {
             allocated_index = ktfs_alloc_datablock(cache, inode, inode->size/KTFS_BLKSZ); //in ANY case where pos is exactly a multiple of blksz, that means we're at the beginning of a new block
             if (allocated_index <0){
@@ -216,7 +216,7 @@ int ktfs_appender(struct cache* cache, struct ktfs_inode* inode, void * buf, int
             }//should always allocate in this case
 			//kprintf("allocated_index: %d\n", allocated_index);
         }
-        else allocated_index = ktfs_get_block_absolute_idx(cache, inode, inode->size/KTFS_BLKSZ); // alloc_index = -1 by the end of this that means we didn't have to allocate a new block for the operation
+        else allocated_index = ktfs_get_block_absolute_idx(cache, inode, inode->size/KTFS_BLKSZ); 
 
         int n_per_cycle = MIN(KTFS_BLKSZ, bytecnt - nstored);
         //actual store part
@@ -803,7 +803,6 @@ long ktfs_fetch(struct uio* uio, void* buf, unsigned long len) {
  * code if error
  */
 long ktfs_store(struct uio* uio, const void* buf, unsigned long len) {
-    // FIXME
     // Similar to fetch
 
     trace("%s(uio=%p, buf=%p, len=%u)\n", __func__, uio, buf, len);
@@ -833,6 +832,8 @@ long ktfs_store(struct uio* uio, const void* buf, unsigned long len) {
     uint32_t absolute_idx;
     struct ktfs_data_block *cache_block;
 
+	kprintf("file->pos: %d\n", file->pos);
+	//kprintf("string: %s",buf);
     //case one: overwriting the file
     while (nstored < firstlen){
         if (firstlen == 0) kprintf("null entry\n");
@@ -861,9 +862,9 @@ long ktfs_store(struct uio* uio, const void* buf, unsigned long len) {
 
     //second case: append to end
 
-    nstored += ktfs_appender(ktfs->cache_ptr, &file->inode_data, (char*)&buf+nstored, secondlen, F_APPEND_STORE); //keep in mind that this will return 0 if second len is 0
+    nstored += ktfs_appender(ktfs->cache_ptr, &file->inode_data, (char*)buf+nstored, secondlen, F_APPEND_STORE); //keep in mind that this will return 0 if second len is 0
 	kprintf("file data after store:\n");
-	kprintf("file size: %d\n", &file->inode_data.size);
+	kprintf("file size: %d\n", file->inode_data.size);
 
     trace("possibly another append issue?");
     return nstored; 
@@ -977,15 +978,19 @@ int ktfs_create(struct filesystem* fs, const char* name) {
  */
 int ktfs_delete(struct filesystem* fs, const char* name) {
 
-    trace("%s(fs: %p, name :%s)\n",__func__, fs, name);
+    kprintf("%s(fs: %p, name :%s)\n",__func__, fs, name);
+
+    if (!fs || !name) return -EINVAL;
     struct ktfs * ktfs_inst = (void *)fs - offsetof(struct ktfs, fs); //just incase we move towards multiple mountable ktfs
     void * blkptr;
 
 
 
-    if (!fs || !name) return -EINVAL;
-    if (strlen(name) > KTFS_MAX_FILENAME_LEN) return -ENOTSUP;
-    if (ktfs_inst->root_directory_inode_data.size/KTFS_DENSZ < 1) return -EINVAL;
+    if (strlen(name) > KTFS_MAX_FILENAME_LEN) return -ENOTSUP; //10/22 I'm sure that this is not our delete bug
+    if (ktfs_inst->root_directory_inode_data.size/KTFS_DENSZ < 1){
+		kprintf("too many inodes im ktfsed");
+		 return -EINVAL;
+	}
 
     //search for file with matching name
     int i = 0;
@@ -994,8 +999,14 @@ int ktfs_delete(struct filesystem* fs, const char* name) {
         if (records->filetab[i] && !strncmp(name, records->filetab[i]->dentry.name, KTFS_MAX_FILENAME_LEN)) break;
         i++;
     }
-    if (i == ktfs_inst->max_inode_count) return -ENOENT; //file not found
-    if (records->filetab[i]->opened) return -EBUSY;//TODO: is this a good guardcase???????
+    if (i == ktfs_inst->max_inode_count){
+		kprintf("we went to ur hood and noone there knew you\n");
+		return -ENOENT; //file not found
+	}
+    if (records->filetab[i]->opened) {	
+		kprintf("doing operations on an open file smh\n");
+		return -EBUSY;
+	}
 
     //decrement count in the root_directory Inode: 
     //copy rdr onto bookkeeping (good measure), 
@@ -1006,6 +1017,7 @@ int ktfs_delete(struct filesystem* fs, const char* name) {
     trace("the inode number that we're looking at: %d\n",ktfs->root_directory_inode%KTFS_NUM_INODES_IN_BLOCK);
     if (rdr->size/KTFS_INOSZ < 1){
         cache_release_block(ktfs_inst->cache_ptr, blkptr, 0);
+		kprintf("too few inodes im ktfsed");
         return -7059;//ok for some reason something changed the root directory inode in the bookkeeping structure without us knowing?????
     }
 
@@ -1033,20 +1045,21 @@ int ktfs_delete(struct filesystem* fs, const char* name) {
     cache_release_block(ktfs_inst->cache_ptr, blkptr, 1);
 
     trace("line %d: rdr_copy size:%d\n",__LINE__, ktfs_inst->root_directory_inode_data.size);
-    if (rdr_copy->size%KTFS_BLKSZ != 0) return 0; //ez dubz
+    if (rdr_copy->size%KTFS_BLKSZ != 0){ 
+		kprintf("would be an astonishing result - rdr_copy->size: %d\n", rdr_copy->size);//seriously?????
+		return 0; //ez dubz
+	}
     
     //not so easy dubz: 
-    //TODO:TODO:      deallocate the last datablock immediately
-    ktfs_free_db_slot(ktfs_inst->cache_ptr, last_db_abs_idx);
-
-    //TODO consider memsetting ... again
+    //TODO:TODO:      deallocate the last datablock immediately <- thats dangerous. in the case of indirection and beyond you'd be cutting off the branch you're sitting on
     
-    //
     uint32_t size = rdr->size;
-    if (size/KTFS_BLKSZ <KTFS_NUM_DIRECT_DATA_BLOCKS){
-        return 0;//the leaf comes straight from the pointer in this case -> we;re already done because we/ve already deallocated the leaf
+    if (size/KTFS_BLKSZ <KTFS_NUM_DIRECT_DATA_BLOCKS){	
+
+    	ktfs_free_db_slot(ktfs_inst->cache_ptr, last_db_abs_idx);
+        return 0;//the leaf comes straight from the pointer in this case
     }
-    size-= KTFS_NUM_DIRECT_DATA_BLOCKS;
+    size -= KTFS_NUM_DIRECT_DATA_BLOCKS;
     if (size/KTFS_BLKSZ < 128){
         //we've deallocated the leaf... all thats left for this case is the first level if it needs to be deleted
         if (size == 0) ktfs_free_db_slot(ktfs_inst->cache_ptr, last_db_abs_idx - ktfs_inst->data_block_start);
