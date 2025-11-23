@@ -111,12 +111,18 @@ int test_ktfs_store_precision(){
 	}
 	
     retval = memcmp(buff1, buff2, BEE_MOVIE_BYTE_LEN/3);
+
+	//kprintf("buff1:\n");
+	//dump_buffer(buff1,((BEE_MOVIE_BYTE_LEN*3)/300)*3);
+	//kprintf("buff2:\n");
+	//dump_buffer(buff2,((BEE_MOVIE_BYTE_LEN*3)/300)*3);
+
     if (retval != 0){
         kprintf("%s: buff1 and buff2 should be identical but are not, by: %d\n",__func__, retval);
-		kprintf("buff1:\n");
-		dump_buffer(&buff1[((BEE_MOVIE_BYTE_LEN/3)/300)*297],((BEE_MOVIE_BYTE_LEN*3)/300)*3);
-		kprintf("buff2:\n");
-		dump_buffer(&buff2[((BEE_MOVIE_BYTE_LEN/3)/300)*297],((BEE_MOVIE_BYTE_LEN*3)/300)*3);
+		//kprintf("buff1:\n");
+		//dump_buffer(&buff1[((BEE_MOVIE_BYTE_LEN/3)/300)*297],((BEE_MOVIE_BYTE_LEN*3)/300)*3);
+		//kprintf("buff2:\n");
+		//dump_buffer(&buff2[((BEE_MOVIE_BYTE_LEN/3)/300)*297],((BEE_MOVIE_BYTE_LEN*3)/300)*3);
         return retval; 
     }
 	
