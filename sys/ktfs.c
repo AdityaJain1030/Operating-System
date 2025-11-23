@@ -92,6 +92,7 @@ struct ktfs_file {
     
     int opened; 
     uint32_t pos; // Position in the current opened file
+	uint32_t dentry_slot;
     struct ktfs_inode inode_data; // we fill out the inode data when we open the file. when we close the file, free it and set the pointer to null. 
 };
 
@@ -626,11 +627,12 @@ int mount_ktfs(const char* name, struct cache* cache) {
         records->filetab[i] = kcalloc(1, sizeof(struct ktfs_file));
 
         memcpy(&records->filetab[i]->dentry,&dentry_block[i%KTFS_NUM_DENTRY_IN_BLOCK], KTFS_DENSZ); //immediately copy in the dentry data into the file record
-        
+		records->filetab[i]->dentry_slot = i;//cp2 addition
+ 
         struct uio_intf * file_uio_intf = kcalloc(1, sizeof(struct uio_intf)); //immediately add a uio interface for all the files we scan through
         memcpy(file_uio_intf, &initial_file_uio_intf, sizeof(struct uio_intf));
         uio_init0(&records->filetab[i]->base, file_uio_intf);
-        trace("name:%s, inode: %d\n", records->filetab[i]->dentry.name,records->filetab[i]->dentry.inode);
+        kprintf("name:%s, inode: %d\n", records->filetab[i]->dentry.name,records->filetab[i]->dentry.inode);
     }
 
     trace("successful ktfs mount\n");
@@ -672,7 +674,10 @@ int ktfs_open(struct filesystem* fs, const char* name, struct uio** uioptr) { //
     //guardcase for no matching file found 
     trace("i: %d\n",i);
     trace("max_inode_count = %d\n", ktfs->max_inode_count);
-    if (i == ktfs->max_inode_count)return -ENOENT; //QUESTION: Do I return negative if nothing was found? 
+    if (i == ktfs->max_inode_count){
+		kprintf("we went to ur hood and nobody there new you\n");
+		return -ENOENT; 
+	}
 
     //guardcase for already opened 
     if (records->filetab[i]->opened ==1) return -EBUSY;
@@ -940,6 +945,7 @@ int ktfs_create(struct filesystem* fs, const char* name) {
     trace("rdr_copy->size: %d and rdr->size: %d\n", rdr_copy->size, rdr->size);
     assert(rdr_copy->size == rdr->size);
     memcpy((void*)rdr, (void*)rdr_copy, KTFS_INOSZ);
+	int new_dentry_slot = rdr->size/KTFS_DENSZ;//cp2 addition
     cache_release_block(ktfs_inst->cache_ptr, blkptr, 1);
 	
 
@@ -956,6 +962,7 @@ int ktfs_create(struct filesystem* fs, const char* name) {
             records->filetab[i] = new_file; 
             trace("put on index i: %d\n", i);
             memcpy(&records->filetab[i]->dentry, &dentry, KTFS_DENSZ);//only thing we really need to replace otherwise remember memset makes everyhting 0. which is what we want
+			records->filetab[i]->dentry_slot = new_dentry_slot;
 			kprintf("kid named inode: %s\n",records->filetab[i]->dentry.name);
             struct uio_intf * file_uio_intf = kcalloc(1, sizeof(struct uio_intf)); //nope never mind we want this too... (copied from mount_ktfs)
             memcpy(file_uio_intf, &initial_file_uio_intf, sizeof(struct uio_intf));
@@ -978,11 +985,12 @@ int ktfs_create(struct filesystem* fs, const char* name) {
  */
 int ktfs_delete(struct filesystem* fs, const char* name) {
 
-    kprintf("%s(fs: %p, name :%s)\n",__func__, fs, name);
+    trace("%s(fs: %p, name :%s)\n",__func__, fs, name);
 
     if (!fs || !name) return -EINVAL;
     struct ktfs * ktfs_inst = (void *)fs - offsetof(struct ktfs, fs); //just incase we move towards multiple mountable ktfs
     void * blkptr;
+	int inode_idx_rpcl = -1;
 
 
 
@@ -996,17 +1004,34 @@ int ktfs_delete(struct filesystem* fs, const char* name) {
     int i = 0;
     while (i< ktfs_inst->max_inode_count){
         // used to be || and that caused an error for some reason this fixed it but I'm too tired to make sure... my traces are all over the place and I probably read the wrong one which sent me down an insane rabbithole
-        if (records->filetab[i] && !strncmp(name, records->filetab[i]->dentry.name, KTFS_MAX_FILENAME_LEN)) break;
+		if (records->filetab[i]) kprintf("name: %s\n",records->filetab[i]->dentry.name);
+        if (records->filetab[i] && !strncmp(name, records->filetab[i]->dentry.name, KTFS_MAX_FILENAME_LEN)) break;	
         i++;
     }
     if (i == ktfs_inst->max_inode_count){
-		kprintf("we went to ur hood and noone there knew you\n");
+		trace("we went to ur hood and noone there knew you\n");
 		return -ENOENT; //file not found
 	}
     if (records->filetab[i]->opened) {	
-		kprintf("doing operations on an open file smh\n");
+		trace("doing operations on an open file smh\n");
 		return -EBUSY;
 	}
+
+
+	int dentry_slot_to_overwrite = records->filetab[i]->dentry_slot;
+	//struct ktfs_dir_entry search_blk[KTFS_NUM_DENTRY_IN_BLOCK];
+	//for (i = 0; i< ktfs->max_inode_count; i++){
+	//	if (i% KTFS_NUM_DENTRY_IN_BLOCK ==0){
+	//		cache_get_block(ktfs_inst->cache_ptr, &blkptr);
+	//		memcpy(search_blk, blkptr, sizeof(search_blk));
+	//		cache_release_blk(ktfs_inst->cache_ptr, blkptr, 0);
+	//	}
+	//	if (!strncmp(name, &search_blk[i].name)) { //same name
+	//		inode_idx_rpcl = search_blk[i].inode;
+	//		break;
+	//	}		
+	//}
+	
 
     //decrement count in the root_directory Inode: 
     //copy rdr onto bookkeeping (good measure), 
@@ -1015,63 +1040,95 @@ int ktfs_delete(struct filesystem* fs, const char* name) {
     cache_get_block(ktfs_inst->cache_ptr, (ktfs_inst->root_directory_inode/KTFS_NUM_INODES_IN_BLOCK+ ktfs_inst->inode_block_start)*KTFS_BLKSZ, &blkptr);
     struct ktfs_inode* rdr = (struct ktfs_inode*)blkptr + (ktfs->root_directory_inode%KTFS_NUM_INODES_IN_BLOCK);
     trace("the inode number that we're looking at: %d\n",ktfs->root_directory_inode%KTFS_NUM_INODES_IN_BLOCK);
-    if (rdr->size/KTFS_INOSZ < 1){
+    if (rdr->size/KTFS_DENSZ < 1){
         cache_release_block(ktfs_inst->cache_ptr, blkptr, 0);
-		kprintf("too few inodes im ktfsed");
+		trace("too few inodes im ktfsed");
         return -7059;//ok for some reason something changed the root directory inode in the bookkeeping structure without us knowing?????
     }
 
     trace("line %d: rdr_copy size:%d\n",__LINE__, ktfs_inst->root_directory_inode_data.size);
     rdr->size -= KTFS_DENSZ;                                                                                         //note that we want to find the LAST datablock, not the start of the next one, which could happen if we have a full block at the end. for this case just decrement the size of a dentry before calling the function
+	rdr_copy->size -= KTFS_DENSZ;																						//NOTE CRITICAL SECTION AROUND HERE: IT CAN GET OVERWRITTEN!
     int last_db_abs_idx = ktfs_get_block_absolute_idx(ktfs_inst->cache_ptr, rdr, rdr->size/KTFS_NUM_DENTRY_IN_BLOCK);//before we decrement, find the absolute index of the last data-block in the inode
-
-    trace("line %d: rdr_copy size:%d\n",__LINE__, ktfs_inst->root_directory_inode_data.size);
-    memcpy(rdr_copy, rdr, KTFS_INOSZ);
+    trace("line %d: rdr_copy size:%d\n",__LINE__, ktfs_inst->root_directory_inode_data.size);							
+    //memcpy(rdr_copy, rdr, KTFS_INOSZ); //this line definitely wasn't nessesary you could have just done rdr_copy->size -= KTFS_DENSZ	
     cache_release_block(ktfs_inst->cache_ptr, blkptr, 1);
 
 
-    trace("line %d: rdr_copy size:%d\n",__LINE__, ktfs_inst->root_directory_inode_data.size);
+	struct ktfs_dir_entry dentry_to_copy;//note: moving this up prevents race conditions
+	cache_get_block(ktfs_inst->cache_ptr, last_db_abs_idx*KTFS_BLKSZ, &blkptr); 
+	struct ktfs_dir_entry * dentry = (struct ktfs_dir_entry*)blkptr + (rdr_copy->size%KTFS_BLKSZ)/KTFS_DENSZ;
+    cache_release_block(ktfs_inst->cache_ptr, blkptr, 0);
+
+    if (rdr_copy->size+1 == dentry_slot_to_overwrite){
+		ktfs_free_inode_slot(ktfs_inst->cache_ptr, dentry_to_copy.inode);
+		kprintf("reached here on initial runs\n");
+		//TODO: recusrively get rid of all the datablocks
+		return 0;
+	}
+
+	
+
+
+	//int dentry_rplc_index = records->filetab[i]->dentry.inode / KTFS_NUM_DENTRY_IN_BLOCK;
+	int dentry_rplc_offset = records->filetab[i]->dentry_slot % KTFS_NUM_DENTRY_IN_BLOCK;
+	
+	int dentry_rplc_blk = ktfs_get_block_absolute_idx(ktfs_inst->cache_ptr, rdr_copy, records->filetab[i]->dentry_slot/KTFS_NUM_DENTRY_IN_BLOCK);
+	//int contiguous_wya = dentry_rplc_index + ktfs_inst->diiOIe;
+	struct ktfs_dir_entry dentry_to_replace;
+
+	cache_get_block(ktfs_inst->cache_ptr, dentry_rplc_blk*KTFS_BLKSZ, &blkptr);
+
+	memcpy(&dentry_to_replace, (struct ktfs_dir_entry*)blkptr + dentry_rplc_offset, KTFS_DENSZ);
+	kprintf("name getting replaced: %s\n", dentry_to_replace.name);
+
+	memcpy((struct ktfs_dir_entry*)blkptr + dentry_rplc_offset, &dentry_to_copy, KTFS_DENSZ);
+	cache_release_block(ktfs_inst->cache_ptr, blkptr, 1);
+
+
+	ktfs_free_inode_slot(ktfs_inst->cache_ptr, records->filetab[i]->dentry.inode);
+	//TODO: recursively get rid of all the datablocks
+	
+	
+
+
     //remove file from file records
     kfree(records->filetab[i]);
     records->filetab[i] = NULL;
-    //TODO: should we memset the inode on the disk too?????? could help with debugging but it shouldn't matter because theres no dentry pointing to it
 
-    //remove dentries 
-    cache_get_block(ktfs_inst->cache_ptr, last_db_abs_idx*KTFS_BLKSZ, &blkptr); 
-    struct ktfs_dir_entry * dentry = (struct ktfs_dir_entry*)blkptr + (rdr_copy->size%KTFS_BLKSZ)/KTFS_DENSZ;//the way this is decremented works out super nicely. kinda i^c selected it lol
-    //TODO: again should I be memsetting? I'm starting to think the answer is no
-    //TODO:TODO:TODO: MAKE SURE THAT THE INODE GETS DEALLOCATED - best to do here since we're going to have to find the inode we want to replace and actually replace it. we can read the data here and make the replacement is what I mean to say
-    ktfs_free_inode_slot(ktfs_inst->cache_ptr, dentry->inode);
-    cache_release_block(ktfs_inst->cache_ptr, blkptr, 1);
+	
+	//cache_get_block(ktfs->cache_ptr, );
 
-    trace("line %d: rdr_copy size:%d\n",__LINE__, ktfs_inst->root_directory_inode_data.size);
-    if (rdr_copy->size%KTFS_BLKSZ != 0){ 
-		kprintf("would be an astonishing result - rdr_copy->size: %d\n", rdr_copy->size);//seriously?????
-		return 0; //ez dubz
-	}
+	return 0;
+
+    //trace("line %d: rdr_copy size:%d\n",__LINE__, ktfs_inst->root_directory_inode_data.size);
+    //if (rdr_copy->size%KTFS_BLKSZ != 0){ 
+	//trace("would be an astonishing result - rdr_copy->size: %d\n", rdr_copy->size);//seriously?????
+//		return 0; //ez dubz
+//	}
     
     //not so easy dubz: 
-    //TODO:TODO:      deallocate the last datablock immediately <- thats dangerous. in the case of indirection and beyond you'd be cutting off the branch you're sitting on
+    //deallocate the last datablock immediately <- thats dangerous. in the case of indirection and beyond you'd be cutting off the branch you're sitting on
     
-    uint32_t size = rdr->size;
-    if (size/KTFS_BLKSZ <KTFS_NUM_DIRECT_DATA_BLOCKS){	
+    //uint32_t size = rdr->size;
+    //if (size/KTFS_BLKSZ <KTFS_NUM_DIRECT_DATA_BLOCKS){	
 
-    	ktfs_free_db_slot(ktfs_inst->cache_ptr, last_db_abs_idx);
-        return 0;//the leaf comes straight from the pointer in this case
-    }
-    size -= KTFS_NUM_DIRECT_DATA_BLOCKS;
-    if (size/KTFS_BLKSZ < 128){
+    //	ktfs_free_db_slot(ktfs_inst->cache_ptr, last_db_abs_idx);
+   //     return 0;//the leaf comes straight from the pointer in this case
+    //}
+    //size -= KTFS_NUM_DIRECT_DATA_BLOCKS;
+    //if (size/KTFS_BLKSZ < 128){
         //we've deallocated the leaf... all thats left for this case is the first level if it needs to be deleted
-        if (size == 0) ktfs_free_db_slot(ktfs_inst->cache_ptr, last_db_abs_idx - ktfs_inst->data_block_start);
-        return 0;
+    //    if (size == 0) ktfs_free_db_slot(ktfs_inst->cache_ptr, last_db_abs_idx - ktfs_inst->data_block_start);
+    //    return 0;
 
-    }
-    size-= 128;
-    if (size/KTFS_BLKSZ < 2*128*128){
-        return -ENOTSUP;//MASSIVE TODO TODO TODO TODO: finish implementing dindirect deallocation here
-    }
+    //}
+    //size-= 128;
+    //if (size/KTFS_BLKSZ < 2*128*128){
+    //    return -ENOTSUP;//MASSIVE TODO TODO TODO TODO: finish implementing dindirect deallocation here
+    //}
 
-    return -EINVAL;//just like with create, something went wrong if you ended up here (how did oyu manage to have an rdr size bigger than the max_filesize)
+    //return -EINVAL;//just like with create, something went wrong if you ended up here (how did oyu manage to have an rdr size bigger than the max_filesize)
 }
 
 /**
