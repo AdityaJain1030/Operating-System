@@ -158,20 +158,20 @@ int process_exec(struct uio* exefile, int argc, char** argv) {
     // 6. set SPP (and SPIE almost forgot)
     // csrs_sstatus(RISCV_SSTATUS_SPIE | RISCV_SSTATUS_SPP); // this is wrong
     // trap frame swaps out sstatus with its own, we should just set the trapframe sstatus
-    struct trap_frame *trap = kcalloc(sizeof (struct trap_frame), 1);
-    trap->sstatus = csrr_sstatus();
-    trap->sstatus &= ~RISCV_SSTATUS_SPP;
-    trap->sstatus |= RISCV_SSTATUS_SPIE;
+    struct trap_frame trap;
+    trap.sstatus = csrr_sstatus();
+    trap.sstatus &= ~RISCV_SSTATUS_SPP;
+    trap.sstatus |= RISCV_SSTATUS_SPIE;
 
     // set the rest of the trap frame as well
-    trap->sp = (void *)(UMEM_END_VMA - stack_sz); // hope this is the right address
-    trap->a0 = (long)argc; // ?? this should point to argc location
-    trap->a1 = UMEM_END_VMA - stack_sz; // this should point to argv loc, Im pretty sure this is same as sp, but one goes up one goes down
-    trap->sepc = entry_ptr;
+    trap.sp = (void *)(UMEM_END_VMA - stack_sz); // hope this is the right address
+    trap.a0 = (long)argc; // ?? this should point to argc location
+    trap.a1 = UMEM_END_VMA - stack_sz; // this should point to argv loc, Im pretty sure this is same as sp, but one goes up one goes down
+    trap.sepc = entry_ptr;
 
     // 7. call trap jump with pointers to trap frame and sscratch
     void* kernel_stack = running_thread_stack_base();
-    trap_frame_jump(trap, kernel_stack); // dunno what to set sscratch to yet
+    trap_frame_jump(&trap, kernel_stack); // dunno what to set sscratch to yet
 
     // how do we free the trap frame??? 
 
