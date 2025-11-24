@@ -150,7 +150,7 @@ int ktfs_free_db_slot(struct cache* cache, uint32_t db_blk_num){
     cache_get_block(cache, abs_blk_of_bitmap*KTFS_BLKSZ, &blkptr);
 	int index = (db_blk_num%(KTFS_BLKSZ*8))/8;
 	int offset = (db_blk_num%(KTFS_BLKSZ*8))%8;
-	if (((char *)blkptr)[index] & (0x01<<offset) == 0) trace("warning: decided to free a datablock that has already been freed");//comment out this line when its time to submit
+	if ((((char *)blkptr)[index] & (0x01<<offset)) == 0) trace("warning: decided to free a datablock that has already been freed");//comment out this line when its time to submit
 	((char *)blkptr)[index] &= ~(0x01<<offset);
     cache_release_block(cache, blkptr, 1);
     return 0;
@@ -161,7 +161,7 @@ int ktfs_free_inode_slot(struct cache* cache, uint32_t inode_slot_num){
     cache_get_block(cache, abs_blk_of_bitmap*KTFS_BLKSZ, &blkptr);	
 	int index = (inode_slot_num%(KTFS_BLKSZ*8))/8;
 	int offset = (inode_slot_num%(KTFS_BLKSZ*8))%8;
-	if (((char *)blkptr)[index] & (0x01<<offset) == 0) trace("warning: decided to free an inode that has already been freed");//comment out this line when its time to submit
+	if ((((char *)blkptr)[index] & (0x01<<offset)) == 0) trace("warning: decided to free an inode that has already been freed");//comment out this line when its time to submit
 	((char *)blkptr)[index] &= ~(0x01<<offset);
     cache_release_block(cache, blkptr, 1);
     return 0;
@@ -269,7 +269,6 @@ int ktfs_appender(struct cache* cache, struct ktfs_inode* inode, void * buf, int
 * @ brief: 
 * @ parameters: 
 * @ return: (for convience) the absolute index of the 
-* NOTE: THIS DOESN'T HAVE ANY SIDE  0 ../util/mkfs_ktfs ./ktfs.raw 16M 160 ../usr/games/* ../usr/random_text/* EFFECT ON THE FILE SIZE
 */
 int ktfs_alloc_datablock(struct cache* cache, struct ktfs_inode * inode, uint32_t contiguous_db_to_alloc){
     trace("%s(cache=%p, inode=%p, contiguous_db_to_alloc=%u)\n", __func__, cache, inode, contiguous_db_to_alloc);
@@ -334,7 +333,7 @@ int ktfs_alloc_datablock(struct cache* cache, struct ktfs_inode * inode, uint32_
             lvl_one_alloc_db = ktfs_find_and_use_free_db_slot(cache); 
             if (lvl_one_alloc_db < 0){
                 trace("error from find and use free db");
-                return alloc_db_idx;
+                return lvl_one_alloc_db;
             }
             inode->dindirect[contiguous_db_to_alloc/(128*128)] = lvl_one_alloc_db;
         }else lvl_one_alloc_db = inode->dindirect[contiguous_db_to_alloc/(128*128)] = lvl_two_alloc_db;
@@ -1118,7 +1117,7 @@ int ktfs_delete(struct filesystem* fs, const char* name) {
 
     records->filetab[replacer_filetab_idx]->dentry_slot = target_dentry_slot;
     
-    records->filetab[target_filetab_idx]->dentry_slot = 0;
+    records->filetab[target_filetab_idx] = NULL;
 
 
     

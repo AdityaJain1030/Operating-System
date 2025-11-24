@@ -156,7 +156,7 @@ int sysexec(int fd, int argc, char **argv) {
     // check if process fd is valid
     if (fd < 0) return -EBADFD;
     if (fd >= PROCESS_UIOMAX) return -EBADFD;
-    
+
     // check if args are valid, we also do a nullptr check here and let a
     // null argv slide for now...
     if (argv != NULL && validate_vptr(argv, sizeof(char*) * (argc+1), PTE_U | PTE_R) != 0) return -EINVAL;
@@ -166,6 +166,7 @@ int sysexec(int fd, int argc, char **argv) {
         // if (argv == NULL) continue;
         // if (validate_vptr(argv, 1, PTE_U | PTE_X | PTE_R) != 0) return -EINVAL;
         //  REGARDING NULL CASE (you must pass in argc = 0 for argv = null to work)
+        if (argv == NULL) return -EINVAL;
         if (validate_vstr(argv[i], PTE_R | PTE_U) != 0) return -EINVAL;
     }
 
