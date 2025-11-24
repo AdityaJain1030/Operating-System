@@ -159,14 +159,14 @@ int sysexec(int fd, int argc, char **argv) {
     
     // check if args are valid, we also do a nullptr check here and let a
     // null argv slide for now...
-    if (argv != NULL && validate_vptr(argv, sizeof(char*) * (argc+1), PTE_U | PTE_W | PTE_R) != 0) return -EINVAL;
+    if (argv != NULL && validate_vptr(argv, sizeof(char*) * (argc+1), PTE_U | PTE_R) != 0) return -EINVAL;
 
     for (int i = 0; i < argc; i++)
     {
         // if (argv == NULL) continue;
         // if (validate_vptr(argv, 1, PTE_U | PTE_X | PTE_R) != 0) return -EINVAL;
         //  REGARDING NULL CASE (you must pass in argc = 0 for argv = null to work)
-        if (validate_vstr(argv[i], PTE_R | PTE_W | PTE_U) != 0) return -EINVAL;
+        if (validate_vstr(argv[i], PTE_R | PTE_U) != 0) return -EINVAL;
     }
 
     struct process *running = current_process();
@@ -424,6 +424,8 @@ int sysclose(int fd) {
     if (running->uiotab[fd] == NULL) return -ENOENT;
 
     uio_close(running->uiotab[fd]);
+
+    running->uiotab[fd] = NULL;
     return 0;
 
 }
