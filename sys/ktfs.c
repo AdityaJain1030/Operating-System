@@ -323,11 +323,42 @@ int ktfs_alloc_datablock(struct cache* cache, struct ktfs_inode * inode, uint32_
 
     //TODO: dindirect case
     //
-	
-    trace("if we actually rteached here thats probalby where our error is.\n");
+    if (contiguous_db_to_alloc >= 2*128*128) return -ENOTSUP;
 
 
-    return -ENOTSUP; 
+    int lvl_two_alloc_db = -1;
+    int lvl_one_alloc_db = -1;
+
+    if (contiguous_db_to_alloc % 128 == 0){ //means we have to AT LEAST do the second level of allocation
+        if (contiguous_db_to_alloc % (128*128) ==0){
+            lvl_one_alloc_db = ktfs_find_and_use_free_db_slot(cache); 
+            if (lvl_one_alloc_db < 0){
+                trace("error from find and use free db");
+                return alloc_db_idx;
+            }
+            inode->dindirect[contiguous_db_to_alloc/(128*128)] = lvl_one_alloc_db;
+        }else lvl_one_alloc_db = inode->dindirect[contiguous_db_to_alloc/(128*128)] = lvl_two_alloc_db;
+        
+        lvl_two_alloc_db = ktfs_find_and_use_free_inode_slot(cache);
+        cache_get_block(cache, (ktfs->data_block_start+ lvl_one_alloc_db)*KTFS_BLKSZ, &blkptr);
+        ((uint32_t *)blkptr)[(contiguous_db_to_alloc%(128*128))/128] = lvl_one_alloc_db;
+        cache_release_block(cache, blkptr, 1);
+    }
+    else{
+        lvl_one_alloc_db = inode->dindirect[contiguous_db_to_alloc/(128*128)];
+        cache_get_block(cache, (ktfs->data_block_start + lvl_one_alloc_db)*KTFS_BLKSZ, &blkptr);
+        lvl_two_alloc_db = ((uint32_t *)blkptr)[(contiguous_db_to_alloc%(128*128))/128];
+        cache_release_block(cache, blkptr, 0);
+    }
+
+    //at this point we will always have a lvl2 block
+
+    int new_leaf_db = ktfs_find_and_use_free_db_slot(cache);
+
+    cache_get_block(cache, (lvl_two_alloc_db+ ktfs->data_block_start)*KTFS_BLKSZ, &blkptr);
+    ((uint32_t *)blkptr)[contiguous_db_to_alloc%128] = new_leaf_db;
+    cache_release_block(cache, blkptr, 1);
+    return new_leaf_db; 
 }
 
 
@@ -1015,6 +1046,9 @@ int ktfs_delete(struct filesystem* fs, const char* name) {
     struct ktfs_dir_entry replacement_dentry_actual;
     struct ktfs_dir_entry target_dentry_actual; //will be useful later for when we 
 
+    struct ktfs_inode target_inode;
+
+    memcpy(&target_inode,&records->filetab[target_filetab_idx]->inode_data, KTFS_INOSZ);
             trace("line\n");
 
     if (target_dentry_slot == replacement_dentry_slot) { //no replacement case,
@@ -1030,24 +1064,28 @@ int ktfs_delete(struct filesystem* fs, const char* name) {
             ktfs_free_db_slot(ktfs_inst->cache_ptr, abs_blk_to_dealloc - ktfs_inst->data_block_start); // to my teammates, notice the conversion. both the free for the datablocks and the inodes is relative to the start of their sections
         }
         //free up the "live" bookkeppers tehat we set up in mount so that it doesn't conflict
-
         records->filetab[target_filetab_idx] = NULL;
 
         //goto delete_cleanup;//yeah, I don't know why either
 
-        ktfs_free_inode_slot(ktfs_inst->cache_ptr, replacement_dentry_actual.inode);//deallocate the inode. easy money
-
         //TODO: helper function that deallocates all blocks taht belong to a ktfs file
+
+        //ktfs_free_inode_slot(ktfs_inst->cache_ptr, target_dentry_actual.inode);//deallocate the inode.  BUT ONLY AFTER WE FREE THE INODE OBJS
+
     kprintf("target_dentry_slot: %d\n", target_dentry_slot);
     kprintf("replacement_dentry_slot: %d\n", replacement_dentry_slot);
     kprintf("replacer_filetab_idx: %d\n", replacer_filetab_idx);
     kprintf("target_filetab_idx: %d\n", target_filetab_idx);
     kprintf("number of files after second delete case (for myself): %d\n", ktfs_inst->root_directory_inode_data.size/KTFS_DENSZ);
-        return 0;
+
+        kprintf("YEAHHH PUNCH IT CHEWIE\n");
+        goto delete_cleanup;
+        //return 0;
     }
 
     
     //the replacement case 
+    kprintf("reached\n");
     
     //** please note that both of these are in ABSOLUTE indexed*/
     int resident_blk_of_replacement_dentry = ktfs_get_block_absolute_idx(ktfs_inst->cache_ptr, &ktfs_inst->root_directory_inode_data, ktfs_inst->root_directory_inode_data.size/KTFS_NUM_DENTRY_IN_BLOCK);
@@ -1079,15 +1117,42 @@ int ktfs_delete(struct filesystem* fs, const char* name) {
     trace("records->filetab[replacer_filetab_idx]->dentry_slot: %d\n", records->filetab[replacer_filetab_idx]->dentry_slot);
 
     records->filetab[replacer_filetab_idx]->dentry_slot = target_dentry_slot;
-    records->filetab[target_filetab_idx]->dentry_slot = NULL;
+    
+    records->filetab[target_filetab_idx]->dentry_slot = 0;
+
 
     
 
-//delete_cleanup: 
+delete_cleanup: 
 
-    ktfs_free_inode_slot(ktfs_inst->cache_ptr, replacement_dentry_actual.inode);//deallocate the inode. easy money
+    
+    
+    ktfs_free_inode_slot(ktfs_inst->cache_ptr, target_dentry_actual.inode);//deallocate the inode. easy money (the inoed was already saved)
 
-        //TODO: helper function that deallocates all blocks taht belong to a ktfs file (same as the other big todo for this function)
+    //recall we saved the state of the target dentry. we also have the rdr data saved with the ktfs struct, so we can use that for convenience since we have 2hr left
+
+    int cont =0;
+
+    int tot = target_inode.size/KTFS_BLKSZ;
+    int flag_delete_indir_later = 0; //for tail deleteion
+
+    while (cont < tot){
+        if (cont >= KTFS_MAX_FILENAME_LEN) return -ENOTSUP;
+
+        if (cont < KTFS_NUM_DIRECT_DATA_BLOCKS){
+            ktfs_free_db_slot(ktfs_inst->cache_ptr, target_inode.block[cont] - ktfs_inst->data_block_start);
+        }
+        else if (cont < 132){
+            if(cont == KTFS_NUM_DIRECT_DATA_BLOCKS) flag_delete_indir_later = 1; 
+            ktfs_free_db_slot(ktfs_inst->cache_ptr, ktfs_get_block_absolute_idx(ktfs_inst->cache_ptr, &target_inode, cont) - ktfs_inst->data_block_start);
+        }
+        else return 0;
+
+        cont++;
+    }
+    //exit free
+    if (flag_delete_indir_later) ktfs_free_db_slot(ktfs_inst->cache_ptr, target_inode.indirect);
+
     return 0;
 
 
