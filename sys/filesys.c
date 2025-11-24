@@ -339,7 +339,7 @@ int parse_path(char* path, char** mpnameptr, char** flnameptr) {
     *mpnameptr = (void*) path;
     *flnameptr = (void*)((uintptr_t)dash + 1);
 
-    unsigned long mpname_len = (uintptr_t) dash - (uintptr_t) path;
+    // unsigned long mpname_len = (uintptr_t) dash - (uintptr_t) path;
     // unsigned long flname_len = path_len - mpname_len;
 
     // *mpnameptr = kmalloc(mpname_len + 1); // add null terminator
@@ -347,7 +347,7 @@ int parse_path(char* path, char** mpnameptr, char** flnameptr) {
 
     // strncpy(*mpnameptr, mpnamestart, mpname_len);
     
-    (*mpnameptr)[mpname_len] = '\0'; // add null terminator
+    *dash = '\0'; // add null terminator
 
     // strncpy(*flnameptr, flnamestart, flname_len);
     
