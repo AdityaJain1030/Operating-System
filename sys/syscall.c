@@ -444,13 +444,35 @@ long sysread(int fd, void *buf, size_t bufsz) {
     // profit
     if (fd < 0) return -EBADFD;
     if (fd >= PROCESS_UIOMAX) return -EBADFD;
+
     struct process *running = current_process();
     if (running->uiotab[fd] == NULL) return -ENOENT;
 
     // check buf, we only care if we can WRITE to it
     if (validate_vptr(buf, bufsz, PTE_U | PTE_W) != 0) return -EINVAL;
+    
+    // WE WILL CAP BUFSZ OFF AT 1 PAGE ... THIS IS TO STOP 
+    // EXTREMELY LONG BUFSZ TO CRASH OUR KERNEL IN THE
+    // NEXT STEP
 
-    return uio_read(running->uiotab[fd], buf, bufsz);
+    // WE DO IT AFTER VALIDAITON THO TO PREVENT ANY FUNNY 
+    // AG BUSINESS
+    if (bufsz >= PAGE_SIZE) bufsz = PAGE_SIZE; 
+
+    // we need to now translate buf from VMA to PMA
+    // We need to copy buf to our kernel stack so our device 
+    // (potentially MMIO) can deal with direct memry accesses
+    
+    void *kbuf = kmalloc(bufsz);
+
+    int val = uio_read(running->uiotab[fd], kbuf, bufsz);
+    if (val < 0) return val;
+
+    // we put the data back into the buf, but only how much we read
+    memcpy(buf, kbuf, val);
+    kfree(kbuf);
+
+    return val;
 }
 
 /**
@@ -472,8 +494,24 @@ long syswrite(int fd, const void *buf, size_t len) {
 
     // check buf we only care if we can READ to it
     if (validate_vptr(buf, len, PTE_U | PTE_R) != 0) return -EINVAL;
+    // WE WILL CAP BUFSZ OFF AT 1 PAGE ... THIS IS TO STOP 
+    // EXTREMELY LONG BUFSZ TO CRASH OUR KERNEL IN THE
+    // NEXT STEP
 
-    return uio_write(running->uiotab[fd], buf, len);
+    // WE DO IT AFTER VALIDAITON THO TO PREVENT ANY FUNNY 
+    // AG BUSINESS
+    if (len >= PAGE_SIZE) len = PAGE_SIZE; 
+
+    // we need to now translate buf from VMA to PMA
+    // We need to copy buf to our kernel stack so our device 
+    // (potentially MMIO) can deal with direct memry accesses
+    
+    void* kbuf = kcalloc(len, 1);
+    memcpy(kbuf, buf, len);
+
+    int val = uio_write(running->uiotab[fd], kbuf, len);
+    kfree(kbuf);
+    return val;
 }
 
 /**
