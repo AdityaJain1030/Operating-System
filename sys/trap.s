@@ -153,6 +153,13 @@ smode_trap_entry_from_umode:
         ld      tp, TFRSZ+KTP(sp)
         ld      gp, TFRSZ+KGP(sp)
 
+
+        # need to save user sp which is in scratch right now into t6
+        csrrw   t6, sscratch, zero      # set the sscratch to 0 now
+        sd      t6, SP(sp)              # store the user sp into sp in trap frame
+
+
+
         # from here on is the same as s_mode
 
         # Set up _ra_ to return from exception and interrupt handlers to next
@@ -208,6 +215,10 @@ smode_trap_entry_from_umode:
         ld      t6, SEPC(sp)
         csrw    sepc, t6
 
+
+
+
+
         # Restore _t6_ and _sp_ last
 
         ld      t6, T6(sp)
@@ -215,8 +226,10 @@ smode_trap_entry_from_umode:
 
         # OUR EDITS
         #CHANGE: WE NEED TO RESTOR SP
-        csrrw  sp, sscratch, sp      # Restore user SP from sscratch
+        csrw    sscratch, sp      # write the bottom stack anchor thingy into sscratch
 
+        # load the sp of the user
+        ld      sp, SP(sp)
         sret    # done!
 
 
