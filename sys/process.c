@@ -105,8 +105,21 @@ int process_exec(struct uio* exefile, int argc, char** argv) {
     //     uio_close(exefile); 
     //     return err;
     // }
+    // LXDL: 11/26/25
+    // Copy Program arguments argc, argv to kernel for this process temporarily
+    // Free all user pages (allocated for the old program) KEEP kernel/IO mappings
+    //  - calls reset)activemspace. Old program gone. Hence we need to save on KERNEL STACK
+    //  - elf_load: load new exectuable image into memory. Make sure to allocate physical pages and update pagetable for new program
+    //  - Pass progam argument back to new progam
+    // 
+    // 
+    // 
+    // 
+    // 
+
 
     // 2. create new page
+    // actual physical page
     void* newpage = alloc_phys_page();
 
     // 3. load arguements onto new page
@@ -295,4 +308,9 @@ int build_stack(void* stack, int argc, char** argv) {
  */
 void fork_func(struct condition* done, struct trap_frame* tfr) {
     // FIXME
+    /*
+    Make a DEEP copy of everything
+    
+    
+    */
 }
