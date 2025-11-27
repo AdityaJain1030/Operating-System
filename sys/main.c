@@ -23,7 +23,7 @@
 #include "thread.h"
 #include "timer.h"
 
-#define INITEXE "zork"  // FIXME
+#define INITEXE "rogue"  // FIXME
 
 // INITEXE: Controls the kernel program
 
@@ -149,10 +149,18 @@ void run_init(void) {
     //  Note that trek takes in a uio object to output to the console
     // void (*start_trek)(struct uio*);
     // void (*start_adele)(struct uio*);
+    /*
+    
+        Rogue:
+            To start a new game set argc = 1
+            To load from a saved game set argc = 2 and set the second argv to be the savea file
+    
+    
+    */
     struct process *curr = running_thread_process();
     open_file(DEVMNTNAME, "uart1",&curr->uiotab[2]);
-    char *argv[] = { INITEXE, "10", NULL };   // 
-    process_exec(initexe, 1, argv);
+    char *argv[] = { INITEXE, "c/a", NULL };   // 
+    process_exec(initexe, 2, argv);
     // elf_load(initexe, &start_trek);
     // start_adele(uart_dev);
 

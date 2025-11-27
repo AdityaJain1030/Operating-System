@@ -221,7 +221,8 @@ smode_trap_entry_from_umode:
 
         # Restore _t6_ and _sp_ last
 
-        ld      t6, T6(sp)
+        # ld      t6, T6(sp)
+        mv      t6, sp                  # move kernel sp to t6
         addi    sp, sp, TFRSZ
 
         # OUR EDITS
@@ -229,7 +230,8 @@ smode_trap_entry_from_umode:
         csrw    sscratch, sp      # write the bottom stack anchor thingy into sscratch
 
         # load the sp of the user
-        ld      sp, SP(sp)
+        ld      sp, SP(t6)        # since SP referred to bottom of trap frame
+        ld      t6, T6(t6)        # t6 was poitmign to old
         sret    # done!
 
 
