@@ -70,6 +70,7 @@ static int sysuiodup(int oldfd, int newfd);
 void handle_syscall(struct trap_frame *tfr) {
     // since we called exception, we want to go to
     // the next instruction
+    // since when using sepc, sepc stores the ecall ADDRESS!
     tfr->sepc += 4;
     // return the result of the syscall
     tfr->a0 = syscall(tfr);
