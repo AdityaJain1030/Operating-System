@@ -240,7 +240,7 @@ smode_trap_entry_from_smode:
         # When we're in S mode, we continue using the kernel _sp_, _tp_, and
         # _gp_. First, recover _sp_ from sscratch and write zero to scratch to
         # indicate that we are now in S mode.
-
+        # before this we ded csrrw sp, sscratch, sp where sscratch initially contained zero. So now sscratch contains the kernel sp so we need to swap back. And also put 0 back to sscratch
         csrrw   sp, sscratch, zero      # Get kernel SP back from sscratch
         addi    sp, sp, -TFRSZ          # Allocate trap frame
 
