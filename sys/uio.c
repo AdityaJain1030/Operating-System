@@ -33,6 +33,19 @@ static long nulluio_write(struct uio* uio, const void* buf, unsigned long buflen
 // INTERNAL GLOBAL VARIABLES AND CONSTANTS
 //
 
+
+// Pipe stuff
+struct pipe_buffer {
+    struct 
+    char* buf;                          // buffer pointer, spec says should be page size
+    unsigned long bufsz;                // buffer size
+    unsigned long head;                 // head is wehre we read, tail is where we write
+    unsigned long tail;                 // tiail is where we write
+    struct lock lock;
+    struct condition not_empty;         // condiiton for pipe intenral buffer not empty
+    struct condition not_full;          // condition for pipe internal buffer not full
+};
+
 void uio_close(struct uio* uio) {
     debug("uio_close: refcnt=%d, has_close=%d", uio->refcnt, (uio->intf->close != NULL));
 
@@ -93,6 +106,12 @@ struct uio* create_null_uio(void) {
 
     return &nulluio;
 }
+
+void create_pipe(struct uio **wptr, struct uio **rptr) {
+    // ...
+
+}
+
 
 static void nulluio_close(struct uio* uio) {
     // ...
