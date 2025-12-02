@@ -785,10 +785,10 @@ void idle_thread_func(void) {
     // need to disable interrupts before checking if the thread list is empty to
     // avoid a race condition where an ISR marks a thread ready to run between
     // the call to tlempty() and the wfi instruction.
-
+    kprintf("entered");
     for (;;) {
         // If there are runnable threads, yield to them.
-
+        
         while (!tlempty(&ready_list))
             running_thread_yield();
         

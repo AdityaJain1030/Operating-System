@@ -9,6 +9,7 @@
  * @brief Enables trace messages for process.c
  */
 #include <stdint.h>
+#include <sys/errno.h>
 #ifdef PROCESS_TRACE
 #define TRACE
 #endif
@@ -193,8 +194,42 @@ int process_exec(struct uio* exefile, int argc, char** argv) {
 
 int process_fork(const struct trap_frame* tfr) {
     // FIXME
-
     // dont deal with this till cp3
+    // we steal the logic for finding open stuff syscall open
+    int pid = -1;
+    for (pid = 0; pid <= NPROC; pid++)
+    {
+        // there are no free procs
+        if (pid == NPROC) return -ENOEXEC;
+
+        // break after pid is found
+        if (proctab[pid] == NULL) break;
+    }
+
+    struct process *proc = current_process(); 
+
+    struct process *newproc = kcalloc(sizeof(struct process), 1);
+    proctab[pid] = newproc;
+
+    // duplicate the fds and increment the uios
+    for (int fd = 0; fd < PROCESS_UIOMAX; fd ++)
+    {
+        if (proc->uiotab[fd] == NULL) continue;
+        newproc->uiotab[fd] = proc->uiotab[fd];
+        uio_addref(proc->uiotab[fd]); // I think this is the right function
+    }
+
+    // duplicate the memspace
+    newproc->mtag = clone_active_mspace();
+
+    // now this is the interesting part...
+    // when we fork this does not run right away, since we
+    // DONT TRAP FRAME JUMP!!! So we have to make sure the trap
+    // lives longer than the function... we are given a pointer but
+    // that pointer can be edited by anyone
+    // so we should take ownership of it
+
+
     return 0;
 }
 
@@ -308,11 +343,13 @@ int build_stack(void* stack, int argc, char** argv) {
  */
 void fork_func(struct condition* done, struct trap_frame* tfr) {
     // FIXME
-    /*
-    Make a DEEP copy of everything
+    
+    // ok this looks like bullshit but I promise this is for a reason
+    // we kmalloced the trap frame earlier to protect it from the world (our shitty code)
+    // now we are gonna do the stack trick where we put it on the stack so we can forget abt it
     
 
-    testing gittt
-    
-    */
+    // ok we know for sure we need to make it out
+    void * kernel_stack = running_thread_stack_base();
+    trap_frame_jump(tfr, kernel_stack);
 }
