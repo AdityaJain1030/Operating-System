@@ -1125,36 +1125,44 @@ int ktfs_delete(struct filesystem* fs, const char* name) {
 delete_cleanup: 
 
     
-    
     ktfs_free_inode_slot(ktfs_inst->cache_ptr, target_dentry_actual.inode);//deallocate the inode. easy money (the inoed was already saved)
 
     //recall we saved the state of the target dentry. we also have the rdr data saved with the ktfs struct, so we can use that for convenience since we have 2hr left
+    //new strategy: use the size of the file to do the indirect and dindirect deletions for the middle datablocks
 
     int cont =0;
-
     int tot = target_inode.size/KTFS_BLKSZ;
-    int flag_delete_indir_later = 0; //for tail deleteion
+    struct ktfs_inode shim_deletion_inode;
 
+    //deletion of all of the leaves ------------------------
     while (cont < tot){
-        if (cont >= KTFS_MAX_FILENAME_LEN) return -ENOTSUP;
-
-        if (cont < KTFS_NUM_DIRECT_DATA_BLOCKS){
-            ktfs_free_db_slot(ktfs_inst->cache_ptr, target_inode.block[cont] - ktfs_inst->data_block_start);
-        }
-        else if (cont < 132){
-            if(cont == KTFS_NUM_DIRECT_DATA_BLOCKS) flag_delete_indir_later = 1; 
-            ktfs_free_db_slot(ktfs_inst->cache_ptr, ktfs_get_block_absolute_idx(ktfs_inst->cache_ptr, &target_inode, cont) - ktfs_inst->data_block_start);
-        }
-        else return 0;
-
+        ktfs_free_db_slot(ktfs_inst->cache_ptr, ktfs_get_block_absolute_idx(ktfs_inst->cache_ptr,&target_inode, cont) - ktfs_inst->data_block_start);
         cont++;
+    } 
+
+    //indirect middleman deletion --------------------------
+    if (target_inode.size/KTFS_BLKSZ >=KTFS_NUM_INDIRECT_BLOCKS) ktfs_free_db_slot(ktfs_inst->cache_ptr, target_inode.indirect - ktfs_inst->data_block_start);
+    else return 0; //just a performance thing
+
+
+    //dindirect middlemen deletion --------------------------
+    int nlvl2_dindirects = ((target_inode.size/KTFS_BLKSZ)-132)/(128);
+    int nlvl1_dindirects = ((target_inode.size/KTFS_BLKSZ)-132)/(128*128);
+
+    int lvl2_del = 0;
+    while (lvl2_del < nlvl2_dindirects){
+        if (lvl2_del%128 == 0) shim_deletion_inode.indirect = target_inode.dindirect[(lvl2_del)/(128)]; //this stuff is hard to explain in comments. just look as the way the nlvlx variables are calculated, as a way to "select" a specific subset of the tree
+        ktfs_free_db_slot(ktfs_inst->cache_ptr, ktfs_get_block_absolute_idx(ktfs_inst->cache_ptr, &shim_deletion_inode, lvl2_del+KTFS_NUM_DIRECT_DATA_BLOCKS)-ktfs_inst->data_block_start);
+        lvl2_del++;
     }
-    //exit free
-    if (flag_delete_indir_later) ktfs_free_db_slot(ktfs_inst->cache_ptr, target_inode.indirect);
+    int lvl1_del = 0;
+    while (lvl1_del < nlvl1_dindirects){//just delete from the index in the dindirect array
+        ktfs_free_db_slot(ktfs_inst->cache_ptr, target_inode.dindirect[lvl1_del] - ktfs_inst->data_block_start);
+        lvl1_del++;
+    }
+
 
     return 0;
-
-
 }
 
 /**
@@ -1169,7 +1177,7 @@ delete_cleanup:
  * @details FCNTL_SETPOS should set the current position of the file pointer to the value passed in
  * through arg.
  * @param uio the uio object of the file to perform the control function
- * @param cmd the operation to execute. KTFS should support FCNTL_GETEND, FCNTL_SETEND (CP2),
+
  * FCNTL_GETPOS, FCNTL_SETPOS.
  * @param arg the argument to pass in, may be different for different control functions
  * @return 0 if successful, negative error code if error
@@ -1250,8 +1258,14 @@ void ktfs_flush(struct filesystem* fs) {
  * @return None
  */
 void ktfs_listing_close(struct uio* uio) {
+    trace("%s(uio=%p)", __func__, uio);
     // FIXME
-    return;
+
+    if (!uio) return -EINVAL;
+    
+    uio_close(uio);
+
+    return;//wthelly it can NOT be that easy to impl lmfao;
 }
 
 /**
@@ -1263,7 +1277,47 @@ void ktfs_listing_close(struct uio* uio) {
  * @return The size written to the buffer
  */
 long ktfs_listing_read(struct uio* uio, void* buf, unsigned long bufsz) {
-    // FIXME
-    return -ENOTSUP;
+    trace("%s(uio=%p, buf=%p, bufsz=%u)", __func__,  uio, buf, bufsz);
+    void * blkptr;
+
+    //TODO: guard cases?
+    if (!uio || !buf) return -EINVAL;
+
+
+    //TODO: update rdr copy? surely its not actually nessesary... but we did have that one idea
+    // cache_get_block(ktfs->cache_ptr, (ktfs->root_directory_inode/KTFS_NUM_INODES_IN_BLOCK)+ktfs->inode_block_start, &blkptr);
+    // struct ktfs_inode * rdr = (struct ktfs_inode *)blkptr + ktfs->root_directory_inode%KTFS_NUM_INODES_IN_BLOCK;
+    // int size = rdr->size;
+    // cache_release_block(ktfs->cache_ptr, blkptr, 0);
+    int size = ktfs->root_directory_inode_data.size; //... it could be this easy
+    //if (bufsz < (size/KTFS_DENSZ)*(KTFS_MAX_FILENAME_LEN+1)) return -ENOTSUP; //TODO: I Dont even think this is a good validation...
+
+
+    char cpy_buffer[KTFS_BLKSZ] = { };
+    struct ktfs_dir_entry * cpydentry = NULL;
+
+    ndentry = 0;
+    nbytesRead = 0;//need to make sure we don't pass the bufsz somehow
+
+    while (ndentry < size/KTFS_NUM_DENTRY_IN_BLOCK){
+        if (i % KTFS_NUM_DENTRY_IN_BLOCK == 0){
+            cache_get_block(ktfs->cache_ptr, ktfs_get_block_absolute_idx(ktfs->cache_ptr, &ktfs->root_directory_inode, i/KTFS_NUM_DENTRY_IN_BLOCK), &blkptr);
+            memcpy(&cpy_buffer, blkptr, KTFS_BLKSZ);
+            cache_release_block(ktfs->cache_ptr, blkptr, 0);
+        }
+        cpydentry = &((struct ktfs_dir_entry *)blkptr)[ndentry%KTFS_NUM_DENTRY_IN_BLOCK];
+
+        char * name = cpydentry->name;
+        int namelen = strlen(name);
+
+        if (nbytesRead +(namelen+1) >= bufsz) return nbytesRead; //as mentioned before, we cannot exceed bufsz and partial reads of file names just sounds wrong, so just end if before a partial read
+        strncpy((char *)buf+nbytesRead, name, namelen);
+        nbytesRead += namelen+1; //preincrement becasue I'm pretty sure we need to account for the null terminator for all the file names, whihc this accomplishes
+        ((char *)buf)[nbytesRead] = 0x0;//add null terminator
+
+        ndentry++;
+    }
+
+    return nbytesRead;
 }
 
