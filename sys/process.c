@@ -9,6 +9,8 @@
  * @brief Enables trace messages for process.c
  */
 #include <stdint.h>
+#include <stdlib.h>
+#include <sys/_types.h>
 #include <sys/errno.h>
 #ifdef PROCESS_TRACE
 #define TRACE
@@ -230,10 +232,16 @@ int process_fork(const struct trap_frame* tfr) {
     // lives longer than the function... we are given a pointer but
     // that pointer can be edited by anyone
     // so we should take ownership of it
+    struct trap_frame *ktfr = malloc(sizeof(struct trap_frame));
+    memcpy(ktfr, tfr, sizeof(struct trap_frame));
+    int ctid = spawn_thread(NULL, (void *)fork_func, NULL, ktfr);
 
+    thread_set_process(ctid, newproc);
+    newproc->tid = ctid;
     //TODO: condition_wait here for the fork func to finish wiht the trap frame    
-    //FIXME: we should be returning child tid here
-    return 0; 
+    //FIXME: we should be returning child tid 
+    
+    return ctid; 
 }
 
 /** \brief
@@ -348,11 +356,13 @@ void fork_func(struct condition* done, struct trap_frame* tfr) {
     // FIXME
     
     // ok this looks like bullshit but I promise this is for a reason
-    // we kmalloced the trap frame earlier to protect it from the world (our shitty code)
+    // we kmalloced the trap frame earlier to protect it from the world
     // now we are gonna do the stack trick where we put it on the stack so we can forget abt it
     
     // TODO: condition broadcast here
-
+    struct trap_frame ktfr;
+    memcpy(&ktfr, tfr, sizeof(struct trap_frame));
+    kfree(tfr);
     // ok we know for sure we need to make it out
     void * kernel_stack = running_thread_stack_base();
     //FIXME: shouldn't we be setting a0 to 0 here? maybe I'm trippin
