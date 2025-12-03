@@ -193,8 +193,6 @@ int process_exec(struct uio* exefile, int argc, char** argv) {
 }
 
 int process_fork(const struct trap_frame* tfr) {
-    // FIXME
-    // dont deal with this till cp3
     // we steal the logic for finding open stuff syscall open
     int pid = -1;
     for (pid = 0; pid <= NPROC; pid++)
@@ -205,11 +203,15 @@ int process_fork(const struct trap_frame* tfr) {
         // break after pid is found
         if (proctab[pid] == NULL) break;
     }
+    //TODO: initialize the condition here
+    //TODO/FIXME: the next line should be the correct thing to do, but perhaps we need to be safer with how we pass in the tfr (ie memcpy into a new tfr and then use that one)
+    //int child_tid = thread_spawn("fork_func", fork_func, tfr); //NOTE: tfr is the trap frame we want the child to spawn using 
 
     struct process *proc = current_process(); 
 
     struct process *newproc = kcalloc(sizeof(struct process), 1);
     proctab[pid] = newproc;
+    //TODO: just realized this but we should be setting the child threads tid somewhere here right?
 
     // duplicate the fds and increment the uios
     for (int fd = 0; fd < PROCESS_UIOMAX; fd ++)
@@ -229,8 +231,9 @@ int process_fork(const struct trap_frame* tfr) {
     // that pointer can be edited by anyone
     // so we should take ownership of it
 
-
-    return 0;
+    //TODO: condition_wait here for the fork func to finish wiht the trap frame    
+    //FIXME: we should be returning child tid here
+    return 0; 
 }
 
 /** \brief
@@ -348,8 +351,10 @@ void fork_func(struct condition* done, struct trap_frame* tfr) {
     // we kmalloced the trap frame earlier to protect it from the world (our shitty code)
     // now we are gonna do the stack trick where we put it on the stack so we can forget abt it
     
+    // TODO: condition broadcast here
 
     // ok we know for sure we need to make it out
     void * kernel_stack = running_thread_stack_base();
+    //FIXME: shouldn't we be setting a0 to 0 here? maybe I'm trippin
     trap_frame_jump(tfr, kernel_stack);
 }
