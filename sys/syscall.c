@@ -206,6 +206,16 @@ int sysfork(const struct trap_frame *tfr) {
 
 int syswait(int tid) { 
     // cp3
+
+    // based off of DKW SU25 lecture posted on Piazza
+    // LXDL
+
+    if (0 <= tid)
+        return thread_join(tid);    // thread join will hold the proeprr retun value
+    else
+        return -EINVAL;
+
+
     return 0;
 }
 
