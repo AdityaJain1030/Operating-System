@@ -28,6 +28,8 @@
 #include "timer.h"
 #include "uio.h"
 
+
+
 // EXPORTED FUNCTION DECLARATIONS
 //
 
@@ -580,5 +582,23 @@ int syspipe(int *wfdptr, int *rfdptr) {
 
 int sysuiodup(int oldfd, int newfd) {
     // cp3
-    return 0;
+    // LXDL sysuiodup
+
+    // replaces old file desciptor with a new one
+    /*
+    
+        make sure to check if oldfd exists
+    */
+    if (oldfd < 0 || newfd < 0) return -EBADFD;
+    if (oldfd >= PROCESS_UIOMAX || newfd >= PROCESS_UIOMAX) return -EBADFD;
+
+
+
+    struct process *running = current_process();
+
+    // check if oldfd actually has something or if newfd is already taken
+    if (running->uiotab[oldfd] == NULL || running->uiotab[newfd] != NULL) return -EBADFD;
+    running->uiotab[newfd] = running->uiotab[oldfd];
+    uio_addref(running->uiotab[newfd]);   // dont forget to increment refcnt
+    return newfd;
 }
