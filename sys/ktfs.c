@@ -133,7 +133,6 @@ int ktfs_free_db_slot(struct cache* cache, uint32_t db_blk_num);//
 int ktfs_free_inode_slot(struct cache* cache, uint32_t inode_slot_num); //
 
 
-
 static const struct uio_intf initial_file_uio_intf = {
     .close = &ktfs_close,
     .cntl = &ktfs_cntl,
@@ -285,15 +284,16 @@ int ktfs_alloc_datablock(struct cache* cache, struct ktfs_inode * inode, uint32_
     }
     contiguous_db_to_alloc -= KTFS_NUM_DIRECT_DATA_BLOCKS;
 
-	trace("contiguous_db_to_alloc: %d\n",contiguous_db_to_alloc);
 
     if (contiguous_db_to_alloc< 128){
     
+	kprintf("reached indirect blocks in %s\n", __func__);
+
         if (contiguous_db_to_alloc == 0){ //case that its the first block we need to store in the indirects, so there isn't already a datablock indirection
             alloc_db_idx = ktfs_find_and_use_free_db_slot(cache);
 			trace("alloc_db_idx: %d\n", alloc_db_idx);
-            if (alloc_db_idx <0){
-				trace("ktfs_find_and_use_free_db_slot returned error: %s\n", error_name(alloc_db_idx));
+            if (alloc_db_idx < 0){
+				kprintf("ktfs_find_and_use_free_db_slot returned error: %s\n", error_name(alloc_db_idx));
 				return alloc_db_idx;
 			}
             inode->indirect = alloc_db_idx;
@@ -301,7 +301,7 @@ int ktfs_alloc_datablock(struct cache* cache, struct ktfs_inode * inode, uint32_
         
         int new_indir_blk = ktfs_find_and_use_free_db_slot(cache);//allocate new indirect blk (leaf)
 		
-		trace("new_indir_blk %d\n", new_indir_blk);
+		kprintf("new_indir_blk %d\n", new_indir_blk);
         if (new_indir_blk < 0){
             //inode->indirect = 0;//don't see why to do that
             return new_indir_blk;
@@ -309,28 +309,44 @@ int ktfs_alloc_datablock(struct cache* cache, struct ktfs_inode * inode, uint32_
 		
         //write new pointer into the indirect blk
         if (cache_get_block(cache, (inode->indirect + ktfs->data_block_start) * KTFS_BLKSZ, &blkptr)< 0){
-            trace("cache_get_block returned a negative value\n");
+            kprintf("cache_get_block returned a negative value\n");
             return -EINVAL;
         }
         ((uint32_t*)blkptr)[contiguous_db_to_alloc] = (uint32_t)new_indir_blk;
         cache_release_block(cache, blkptr, 1);
 		
         return new_indir_blk + ktfs->data_block_start; //REMEBER THIS FUNCTION ALWAYS RETURNS THE LEAF OF THE SEQUENCE THATS ALLOCATED	
+        
     }
 
     contiguous_db_to_alloc -= 128;
-
+    
     //TODO: dindirect case
     //
     if (contiguous_db_to_alloc >= 2*128*128) return -ENOTSUP;
 
+	kprintf("reached dindirect blocks in %s\n", __func__);
 
     int lvl_two_alloc_db = -1;
     int lvl_one_alloc_db = -1;
 
     if (contiguous_db_to_alloc % 128 == 0){ //means we have to AT LEAST do the second level of allocation
         if (contiguous_db_to_alloc % (128*128) ==0){
-            lvl_one_alloc_db = ktfs_find_and_use_free_db_slot(cache); 
+            lvl_one_alloc_db = ktfs_find_and_use_free_db_slot(cache);
+            if (lvl_one_alloc_db < 0){
+                trace("error from find and use free db");
+                return lvl_one_alloc_db;
+            }
+            inode->dindirect[contiguous_db_to_alloc/(128*128)] = lvl_one_alloc_db;
+        }else lvl_one_alloc_db = inode->dindirect[contiguous_db_to_alloc/(128*128)]; //= lvl_two_alloc_db; WTFFFFFFFF
+        
+        lvl_two_alloc_db = ktfs_find_and_use_free_db_slot(cache);
+    int lvl_two_alloc_db = -1;
+    int lvl_one_alloc_db = -1;
+
+    if (contiguous_db_to_alloc % 128 == 0){ //means we have to AT LEAST do the second level of allocation
+        if (contiguous_db_to_alloc % (128*128) ==0){
+            lvl_one_alloc_db = ktfs_find_and_use_free_db_slot(cache);
             if (lvl_one_alloc_db < 0){
                 trace("error from find and use free db");
                 return lvl_one_alloc_db;
@@ -338,7 +354,26 @@ int ktfs_alloc_datablock(struct cache* cache, struct ktfs_inode * inode, uint32_
             inode->dindirect[contiguous_db_to_alloc/(128*128)] = lvl_one_alloc_db;
         }else lvl_one_alloc_db = inode->dindirect[contiguous_db_to_alloc/(128*128)] = lvl_two_alloc_db;
         
-        lvl_two_alloc_db = ktfs_find_and_use_free_inode_slot(cache);
+        lvl_two_alloc_db = ktfs_find_and_use_free_db_slot(cache);
+        cache_get_block(cache, (ktfs->data_block_start+ lvl_one_alloc_db)*KTFS_BLKSZ, &blkptr);
+        ((uint32_t *)blkptr)[(contiguous_db_to_alloc%(128*128))/128] = lvl_one_alloc_db;
+        cache_release_block(cache, blkptr, 1);
+    }
+    else{
+        lvl_one_alloc_db = inode->dindirect[contiguous_db_to_alloc/(128*128)];
+        cache_get_block(cache, (ktfs->data_block_start + lvl_one_alloc_db)*KTFS_BLKSZ, &blkptr);
+        lvl_two_alloc_db = ((uint32_t *)blkptr)[(contiguous_db_to_alloc%(128*128))/128];
+        cache_release_block(cache, blkptr, 0);
+    }
+
+    //at this point we will always have a lvl2 block
+
+    int new_leaf_db = ktfs_find_and_use_free_db_slot(cache);
+
+    cache_get_block(cache, (lvl_two_alloc_db+ ktfs->data_block_start)*KTFS_BLKSZ, &blkptr);
+    ((uint32_t *)blkptr)[contiguous_db_to_alloc%128] = new_leaf_db;
+    cache_release_block(cache, blkptr, 1);
+    return new_leaf_db; 
         cache_get_block(cache, (ktfs->data_block_start+ lvl_one_alloc_db)*KTFS_BLKSZ, &blkptr);
         ((uint32_t *)blkptr)[(contiguous_db_to_alloc%(128*128))/128] = lvl_one_alloc_db;
         cache_release_block(cache, blkptr, 1);
