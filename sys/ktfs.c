@@ -836,14 +836,14 @@ long ktfs_store(struct uio* uio, const void* buf, unsigned long len) {
         }
         absolute_idx = ktfs_get_block_absolute_idx(ktfs->cache_ptr, &file->inode_data, file->pos/KTFS_BLKSZ);
         if (absolute_idx < 0) {
-            trace("absolute_idx <0");
+            kprintf("absolute_idx <0");
             return absolute_idx; //propagate error
         }
 
         //trace("a number that is pretty important to us at this point: %d", absolute_idx*KTFS_BLKSZ);
         retval = cache_get_block(ktfs->cache_ptr, absolute_idx*KTFS_BLKSZ, (void *)&cache_block);
         if (retval < 0){
-            trace("cache_get_block failed: retval: %d\n", retval);
+            kprintf("cache_get_block failed: retval: %d\n", retval);
             cache_release_block(ktfs->cache_ptr, cache_block, 0);
             return retval;
         }
