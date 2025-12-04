@@ -848,7 +848,8 @@ long ktfs_store(struct uio* uio, const void* buf, unsigned long len) {
             return retval;
         }
         trace("ok so at this point we should have cache_get_blocked something lets see what happened about it");
-        memcpy((char *)buf+nstored, (char *)(cache_block->data)+(file->pos % KTFS_BLKSZ),nwritten); //TODO... THIS WHOLE THING WAS PASTED FROM FETCH
+        //memcpy((char *)buf+nstored, (char *)(cache_block->data)+(file->pos % KTFS_BLKSZ),nwritten); //TODO... THIS WHOLE THING WAS PASTED FROM FETCH
+        memcpy((char *)(cache_block->data)+(file->pos % KTFS_BLKSZ), (char *)buf+nstored,nwritten); //TODO... THIS WHOLE THING WAS PASTED FROM FETCH
         cache_release_block(ktfs->cache_ptr, cache_block, 1);
 
         nstored += nwritten;
