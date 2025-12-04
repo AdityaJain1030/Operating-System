@@ -856,7 +856,7 @@ long ktfs_store(struct uio* uio, const void* buf, unsigned long len) {
     }
 
     //second case: append to end
-    kprintf("append case reached\n");
+    if (secondlen != 0) kprintf("append case reached\n");
 
     nstored += ktfs_appender(ktfs->cache_ptr, &file->inode_data, (char*)buf+nstored, secondlen, F_APPEND_STORE); //keep in mind that this will return 0 if second len is 0
 	trace("file data after store:\n");
