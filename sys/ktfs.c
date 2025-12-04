@@ -338,42 +338,9 @@ int ktfs_alloc_datablock(struct cache* cache, struct ktfs_inode * inode, uint32_
                 return lvl_one_alloc_db;
             }
             inode->dindirect[contiguous_db_to_alloc/(128*128)] = lvl_one_alloc_db;
-        }else lvl_one_alloc_db = inode->dindirect[contiguous_db_to_alloc/(128*128)]; //= lvl_two_alloc_db; WTFFFFFFFF
+        }else lvl_one_alloc_db = inode->dindirect[contiguous_db_to_alloc/(128*128)]; //= lvl_two_alloc_db;
         
         lvl_two_alloc_db = ktfs_find_and_use_free_db_slot(cache);
-    int lvl_two_alloc_db = -1;
-    int lvl_one_alloc_db = -1;
-
-    if (contiguous_db_to_alloc % 128 == 0){ //means we have to AT LEAST do the second level of allocation
-        if (contiguous_db_to_alloc % (128*128) ==0){
-            lvl_one_alloc_db = ktfs_find_and_use_free_db_slot(cache);
-            if (lvl_one_alloc_db < 0){
-                trace("error from find and use free db");
-                return lvl_one_alloc_db;
-            }
-            inode->dindirect[contiguous_db_to_alloc/(128*128)] = lvl_one_alloc_db;
-        }else lvl_one_alloc_db = inode->dindirect[contiguous_db_to_alloc/(128*128)] = lvl_two_alloc_db;
-        
-        lvl_two_alloc_db = ktfs_find_and_use_free_db_slot(cache);
-        cache_get_block(cache, (ktfs->data_block_start+ lvl_one_alloc_db)*KTFS_BLKSZ, &blkptr);
-        ((uint32_t *)blkptr)[(contiguous_db_to_alloc%(128*128))/128] = lvl_one_alloc_db;
-        cache_release_block(cache, blkptr, 1);
-    }
-    else{
-        lvl_one_alloc_db = inode->dindirect[contiguous_db_to_alloc/(128*128)];
-        cache_get_block(cache, (ktfs->data_block_start + lvl_one_alloc_db)*KTFS_BLKSZ, &blkptr);
-        lvl_two_alloc_db = ((uint32_t *)blkptr)[(contiguous_db_to_alloc%(128*128))/128];
-        cache_release_block(cache, blkptr, 0);
-    }
-
-    //at this point we will always have a lvl2 block
-
-    int new_leaf_db = ktfs_find_and_use_free_db_slot(cache);
-
-    cache_get_block(cache, (lvl_two_alloc_db+ ktfs->data_block_start)*KTFS_BLKSZ, &blkptr);
-    ((uint32_t *)blkptr)[contiguous_db_to_alloc%128] = new_leaf_db;
-    cache_release_block(cache, blkptr, 1);
-    return new_leaf_db; 
         cache_get_block(cache, (ktfs->data_block_start+ lvl_one_alloc_db)*KTFS_BLKSZ, &blkptr);
         ((uint32_t *)blkptr)[(contiguous_db_to_alloc%(128*128))/128] = lvl_one_alloc_db;
         cache_release_block(cache, blkptr, 1);
