@@ -232,7 +232,7 @@ int process_fork(const struct trap_frame* tfr) {
     // lives longer than the function... we are given a pointer but
     // that pointer can be edited by anyone
     // so we should take ownership of it
-    struct trap_frame *ktfr = malloc(sizeof(struct trap_frame));
+    struct trap_frame *ktfr = kmalloc(sizeof(struct trap_frame));
     memcpy(ktfr, tfr, sizeof(struct trap_frame));
     int ctid = spawn_thread(NULL, (void *)fork_func, NULL, ktfr);
 
