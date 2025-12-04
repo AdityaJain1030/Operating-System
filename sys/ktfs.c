@@ -223,7 +223,6 @@ int ktfs_appender(struct cache* cache, struct ktfs_inode* inode, void * buf, int
         //actual store part
         if (cache_get_block(cache, allocated_index*KTFS_BLKSZ, &blkptr)<0){// (can make this a noop for setend and operations on the root directory inode, although that's a pretty trivial optimization)
             trace("cache_get_block returned a negative value\n");
-
             return -EINVAL;
         }
 
@@ -231,7 +230,7 @@ int ktfs_appender(struct cache* cache, struct ktfs_inode* inode, void * buf, int
         else memcpy(blkptr+inode->size%KTFS_BLKSZ, buf+nstored, n_per_cycle);
 
         cache_release_block(cache, blkptr, 1); //we wrote to a block so its dirty
-
+        
         //increment values
         nstored += n_per_cycle;
         //*pos += n_per_cycle;//do this at the end
@@ -254,9 +253,9 @@ int ktfs_appender(struct cache* cache, struct ktfs_inode* inode, void * buf, int
         return -EINVAL;
     }
 
-	trace("size before memcpy: %d\n",((struct ktfs_inode *)blkptr)[inode_num].size);
+	kprintf("size before memcpy: %d\n",((struct ktfs_inode *)blkptr)[inode_num].size);
     memcpy((char *)blkptr +(inode_num%KTFS_NUM_INODES_IN_BLOCK)*KTFS_INOSZ, inode, KTFS_INOSZ);//memcpy the inode back into the inode blocks at the correct position (given by inode_num% KTFS_NUM_INODES_IN_BLOCK
-	trace("size after memcpy: %d\n",((struct ktfs_inode *)blkptr)[inode_num].size);
+	kprintf("size after memcpy: %d\n",((struct ktfs_inode *)blkptr)[inode_num].size);
     cache_release_block(cache, blkptr, 1);
 	
     trace("nstored: %d\n", nstored);
@@ -287,7 +286,7 @@ int ktfs_alloc_datablock(struct cache* cache, struct ktfs_inode * inode, uint32_
 
     if (contiguous_db_to_alloc< 128){
     
-	kprintf("reached indirect blocks in %s\n", __func__);
+	//kprintf("reached indirect blocks in %s\n", __func__);
 
         if (contiguous_db_to_alloc == 0){ //case that its the first block we need to store in the indirects, so there isn't already a datablock indirection
             alloc_db_idx = ktfs_find_and_use_free_db_slot(cache);
@@ -325,7 +324,7 @@ int ktfs_alloc_datablock(struct cache* cache, struct ktfs_inode * inode, uint32_
     //
     if (contiguous_db_to_alloc >= 2*128*128) return -ENOTSUP;
 
-	kprintf("reached dindirect blocks in %s\n", __func__);
+	//kprintf("reached dindirect blocks in %s\n", __func__);
 
     int lvl_two_alloc_db = -1;
     int lvl_one_alloc_db = -1;
@@ -823,14 +822,18 @@ long ktfs_store(struct uio* uio, const void* buf, unsigned long len) {
     unsigned long nwritten;
     uint32_t absolute_idx;
     struct ktfs_data_block *cache_block;
-
+    int printflag = 0;
 	trace("file->pos: %d\n", file->pos);
 	//trace("string: %s",buf);
     //case one: overwriting the file
     while (nstored < firstlen){
-        if (firstlen == 0) trace("null entry\n");
+        //if (firstlen == 0) trace("null entry\n");
         nwritten = MIN(KTFS_BLKSZ - file->pos%KTFS_BLKSZ, firstlen - nstored); //chooses between the didtance btween the pos and the next block, or whatevers left to fetch
         
+        if (printflag == 0){ 
+            kprintf("overwrite case reached\n");
+            printflag++;
+        }
         absolute_idx = ktfs_get_block_absolute_idx(ktfs->cache_ptr, &file->inode_data, file->pos/KTFS_BLKSZ);
         if (absolute_idx < 0) {
             trace("absolute_idx <0");
@@ -853,6 +856,7 @@ long ktfs_store(struct uio* uio, const void* buf, unsigned long len) {
     }
 
     //second case: append to end
+    kprintf("append case reached\n");
 
     nstored += ktfs_appender(ktfs->cache_ptr, &file->inode_data, (char*)buf+nstored, secondlen, F_APPEND_STORE); //keep in mind that this will return 0 if second len is 0
 	trace("file data after store:\n");
@@ -1147,7 +1151,14 @@ delete_cleanup:
             if(cont == KTFS_NUM_DIRECT_DATA_BLOCKS) flag_delete_indir_later = 1; 
             ktfs_free_db_slot(ktfs_inst->cache_ptr, ktfs_get_block_absolute_idx(ktfs_inst->cache_ptr, &target_inode, cont) - ktfs_inst->data_block_start);
         }
-        else return 0;
+        else {
+            ktfs_free_db_slot(ktfs_inst->cache_ptr, ktfs_get_block_absolute_idx(ktfs_inst->cache_ptr, &target_inode, cont) - ktfs_inst->data_block_start);
+
+            //if (cont == 132+128*128-1) ktfs_free_db_slot(ktfs_inst->cache_ptr, ktfs_get_block_absolute_idx(ktfs_inst->cache_ptr, &target_inode, cont) - ktfs_inst->data_block_start);
+            //if (cont == 132+128*128-1) ktfs_free_db_slot(ktfs_inst->cache_ptr, ktfs_get_block_absolute_idx(ktfs_inst->cache_ptr, &target_inode, cont) - ktfs_inst->data_block_start);
+
+        }
+        //else return 0;
 
         cont++;
     }
