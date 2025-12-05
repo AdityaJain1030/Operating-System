@@ -28,7 +28,8 @@ ALL_TARGETS = \
 	hello \
 	exec_bomb \
 	tests \
-	fork
+	fork \
+	shell
 CFLAGS = -Wall -fno-omit-frame-pointer -ggdb -gdwarf-2
 CFLAGS += -mcmodel=medany -fno-pie -no-pie -march=rv64g -mabi=lp64d
 CFLAGS += -ffreestanding -fno-common -nostdlib -mno-relax

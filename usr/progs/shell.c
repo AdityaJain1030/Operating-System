@@ -1,9 +1,12 @@
 #include "syscall.h"
 #include "string.h"
+#include <sys/syslimits.h>
 #include "shell.h"
 
 #define BUFSIZE 1024
 #define MAXARGS 8
+
+#include "shell_utils.c"
 
 // helper function for parser
 char* find_terminator(char* buf) {
@@ -24,7 +27,8 @@ char* find_terminator(char* buf) {
 	return p;
 }
 
-int parse(char* buf, char** argv) {
+// add redirect in and redirect out files
+int parse(char* buf, char** argv, char **readinf, char** readoutf) {
 	// FIXME
 	// feel free to change this function however you see fit
 
@@ -35,17 +39,25 @@ int parse(char* buf, char** argv) {
 
 	for(;;) { // find each argv
 		while(*head == ' ') head++;
+		// support newlines
+		if (*head == '\0' || *head == '\n') break;
+
+		if (argc >= MAXARGS) break;
 		argv[argc++] = head;
 		end = find_terminator(head);
-
+		temp = *end;
+		*end = '\0';
+		head = end+1;
 		// inner loop handles all file redirection
 		// it may be redirected multiple times
 		for(;;) {
-			temp = *end;
-			*end = '\0';
 			switch(temp) {
 				case ' ':
-					while(*(++head) == ' ') ;
+					while (*head == ' ') head++;
+					temp = *head;
+					// while(*(head) == ' ') head++;
+					// end = head;
+					// temp = *end;
 					continue;
 
 				case '\0':
@@ -53,33 +65,72 @@ int parse(char* buf, char** argv) {
 
 				case FOUT:
 					// FIXME
+					head++;
+					while(*head != '\0')
+					{
+						if (*head != ' ') break;
+						head += 1;
+					}
+					if (*head == '\0') break;
+					end = find_terminator(head);
+					*readoutf = head;
+					temp = *end;
+					*end = '\0';
+					head = end + 1;
+
+					// hopefully this shld work
+					// head = next + 1; // we go to the next arg
+					// if (*next == '\0') head -= 1; // if we are at end we overshot
+					// *next = '\0'; // we do this so then the file uio reader
+					// // dosent trip ... this was a bitch to debug
 					continue;
 					
 				case FIN:
-					// FIXME
+					head++;
+					while(*head != '\0')
+					{
+						if (*head != ' ') break;
+						head += 1;
+					}
+					if (*head == '\0') break;
+					end = find_terminator(head);
+					*readinf = head;
+					temp = *end;
+					*end = '\0';
+					head = end + 1;
+
+					// head = next + 1; // we go to the next arg
+					// if (*next == '\0') head -= 1; // if we are at end we overshot
+					// *next = '\0'; // we do this so then the file uio reader
+					// // dosent trip ... this was a bitch to debug
 					continue;
 
 				case PIPE:
 					// FIXME
+					head++; // we didnt do this yet
 					break;
 
 				default:
-					*head = temp;
+					// *head = temp;
 					break;
 			}
 			break;
 		}
 
 	}
+	argv[argc] = NULL;
+	return argc;
 }
 
-int main()
+void main(void)
 {
     char buf[BUFSIZE];
 	int argc;
-	char* argv[MAXARGS + 1]; 
+	char* argv[MAXARGS + 1];
+	char* readinf;
+	char* readoutf;
 
-  	_open(CONSOLEOUT, "dev/uart1");		// console device
+	_open(CONSOLEOUT, "dev/uart1");		// console device
 	_close(STDIN);              		// close any existing stdin
 	_uiodup(CONSOLEOUT, STDIN);      	// stdin from console
 	_close(STDOUT);              		// close any existing stdout
@@ -89,6 +140,9 @@ int main()
 
 	for (;;)
 	{
+		readinf = NULL;
+		readoutf = NULL; // reset every command 
+		memset(buf, 0, BUFSIZE);
 		printf("LUMON OS> ");
 		getsn(buf, BUFSIZE - 1);
 
@@ -97,5 +151,94 @@ int main()
 
 		// FIXME
 		// Call your parse function and exec the user input
+		argc = parse(buf, argv, &readinf,  &readoutf);
+		// printf("%d", argc);
+		
+		// print out all the buf, argv, readinf, and readoutf in console
+		// print_parsed_command(buf, argv, readinf, readoutf, argc);		
+		// continue;
+		
+		if (argc == 0) continue;
+		if (argc > ARG_MAX) continue;
+
+		// fork
+		// WE FORK FIRST RIGHT AWAY... THIS IS ONE OF THE REASONS WE 
+		// WANT CHILD TO RUN FIRST SO THAT WE CAN SETUP CHILD IN SHELL
+		int pid = _fork();
+		if (pid < 0) {
+			printf("ERROR: Failed to start process with code %d", pid);
+			continue;
+		}
+
+		// the lion dosent concern himself with setup
+		if (pid != 0) {
+			_wait(pid);
+			continue;
+		}
+
+		// open files
+
+		// for exec file prepend c if it is not alr there
+		char name[100]; // same logic as when we do a kernel copy
+		if (strchr(argv[0], '/') == NULL)  // dosent contain a path proper, see docs for why we use this cond
+			snprintf(name, 100, "c/%s", argv[0]);
+		else
+			snprintf(name, 100, "c/%s", argv[0]);
+		
+		// designating 8 as the file to open... not like it matters since we reset anyway
+		_close(8);
+		int ret = _open(8, name);
+		if (ret < 0)
+		{
+			printf("bad cmd file %s with error code %d \n", name, ret);
+			_exit();
+		}
+		
+		if (readinf != NULL)
+		{
+			_close(STDIN);
+			int ret = _open(STDIN, readinf);
+			if (ret < 0) {
+				printf("bad input file %s with error code %d \n", readinf, ret);
+				_exit();
+			}
+		}
+		if (readoutf != NULL)
+		{
+			_close(STDOUT);
+			// we can just delete and recreate the readoutf each time
+			// instead of doing the bs below
+			_fsdelete(readoutf);
+			int ret = _fscreate(readoutf);
+			if (ret < 0)
+			{
+				printf("bad output file create %s with error code %d \n", readoutf, ret);
+				_exit();
+			}
+			ret = _open(STDOUT, readoutf);
+			if (ret < 0)
+			{
+				printf("bad output file open %s with error code %d \n", readoutf, ret);
+				_exit();
+
+				// try creating it first
+				// if (_fscreate(readoutf) < 0)
+				// {
+					// printf("bad input file %s with error code %d \n", readinf, ret);
+				// 	_exit();
+				// }
+				// ret = _open(STDOUT, readoutf);
+				// if (ret < 0)
+				// {
+				// 	printf("bad input file %s with error code %d \n", readinf, ret);
+				// 	_exit();
+				// }
+			}
+		}
+
+		//execute
+
+		_exec(8, argc, argv);
+		printf("Exec not working cro");
 	}
 }

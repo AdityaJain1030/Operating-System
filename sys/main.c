@@ -23,7 +23,7 @@
 #include "thread.h"
 #include "timer.h"
 
-#define INITEXE "fork"  // FIXME
+#define INITEXE "shell"  // FIXME
 
 // INITEXE: Controls the kernel program
 
@@ -158,7 +158,7 @@ void run_init(void) {
     
     */
     struct process *curr = running_thread_process();
-    open_file(DEVMNTNAME, "uart1",&curr->uiotab[2]);
+    // open_file(DEVMNTNAME, "uart1",&curr->uiotab[2]);
     char *argv[] = { INITEXE, "c/a", NULL };   // 
     process_exec(initexe, 1, argv);
     // elf_load(initexe, &start_trek);
