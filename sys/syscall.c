@@ -571,7 +571,60 @@ int sysfcntl(int fd, int cmd, void *arg) {
 int syspipe(int *wfdptr, int *rfdptr) {
     // cp3
     // taking more stabs at this and fixing ;(
+    // both wfdptr, and rfdptr are POITNERS to file descriptors 
+    // NOTE THAT this function is only RESPONSIBEL for creating the PIPE! is NOT repsonsoibel for starting the prrocess on EACH SIDE!
+    // 
+    // 
+    // 
+
+    if (wfdptr == NULL || rfdptr == NULL) return -EINVAL;
+    struct process *running = current_process();
     
+    
+    int wfd = *wfdptr;
+    int rfd = *rfdptr;
+
+    if (wfd >= PROCESS_UIOMAX || rfd >= PROCESS_UIOMAX) return -EBADFD; // bro not sure when to use EBADFD or EINVAL
+
+    if (wfd < -1)   // find next avaiable UIO for write
+    {
+        for (wfd = 0; wfd <= PROCESS_UIOMAX; wfd++)
+        {
+            // there are no free files
+            if (wfd == PROCESS_UIOMAX) return -EMFILE;  // too many files
+
+            // break after fd is found
+            if (running->uiotab[wfd] == NULL) break;    // otherwise found
+        }
+    }
+    else
+    {
+        if (running->uiotab[wfd] != NULL) return -EBADFD; // wfd is positive and already in use
+    }
+    
+    // same loop as above but for reading
+    if (rfd < -1)   // find next avaiable UIO for reads
+    {
+        for (rfd = 0; rfd <= PROCESS_UIOMAX; rfd++)
+        {
+            // there are no free files
+            if (rfd == PROCESS_UIOMAX) return -EMFILE;  // too many files
+
+            // break after fd is found
+            if (running->uiotab[rfd] == NULL) break;    // otherwise found
+        }
+    }
+    else
+    {
+        if (running->uiotab[rfd] != NULL) return -EBADFD; // rfd is positive and already in use
+    }
+
+    create_pipe(&running->uiotab[wfd], &running->uiotab[rfd]);  // creates the UIO pipe
+    running->uiotab[wfd] = running->uiotab[wfd];
+    running->uiotab[rfd] = running->uiotab[rfd];
+
+    *wfdptr = wfd;
+    *rfdptr = rfd; // update the correpsonding read and write poitners
     return 0;
 }
 

@@ -127,6 +127,10 @@ void create_pipe(struct uio **wptr, struct uio **rptr) {
     //lock_init(&pipebuf->lock);
     condition_init(&pipebuf->not_empty, "pipe_not_empty");
     condition_init(&pipebuf->not_full, "pipe_not_full");
+
+    uio_init1(&pipebuf->writeuio, (*));
+    uio_init1(&pipebuf->readuio, &pipe_read_uio_intf);
+    
 }
 
 
