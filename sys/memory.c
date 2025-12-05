@@ -383,12 +383,84 @@ mtag_t switch_mspace(mtag_t mtag) {
 */
 mtag_t clone_active_mspace(void) { 
     //Mon Nov 17 07:35:54 PM CST 2025 - STARTED BY ART MULEY... Ah shoot I didn't realise this was due in mp3
-    //mtag_t original;
 
-    //original = csrr_satp();//I forget what exactly this is a pseudo-instruction for (something with x0) but basically there are no side effects on the satp
-    
-    //TODO: make the DEEP copy here.
-    return (mtag_t)0;
+    struct pte *original = active_space_ptab();
+    struct pte *clone = (struct pte*)alloc_phys_page();
+
+    // loop largely copied from the reset memspace implementation
+    for (int i = 0; i < PTE_CNT; i++)
+    {
+        struct pte pte2 = original[i];
+        if (!PTE_VALID(pte2)) continue; // we dont copy invalids
+        // we are at a valid gigapage
+        
+        if (PTE_GLOBAL(pte2)) {
+            clone[i] = pte2; // this should be fine right, we share global mem
+            continue;
+        }; // copy globals
+
+        if (PTE_LEAF(pte2) && PTE_VALID(pte2)) {
+            // im going to do this later ... idt this matters yet since
+            // our gigapages should be globaled...
+            continue;
+        }
+
+        // get 1 level root
+        struct pte *lvl_1_root = pageptr(pte2.ppn);
+        
+        // create new table for level 1 pte
+        struct pte *clone_l1 = (struct pte*)alloc_phys_page();
+        clone[i] = ptab_pte(clone_l1, 0);
+
+        // loop through level 1 and copy everything here
+        for (int j = 0; j < PTE_CNT; j++)
+        {
+            struct pte pte1 = lvl_1_root[j];
+
+            // check invalid
+            if (!PTE_VALID(pte1)) continue;
+
+            if (PTE_GLOBAL(pte1)) {
+                clone_l1[j] = lvl_1_root[j];
+                continue;
+            }; // same as prev global copy we dont copy mem
+
+            // we are at a valid megapage
+            if (PTE_LEAF(pte1) && PTE_VALID(pte1)) {
+                // still not sure what to do here...
+                continue;
+            }
+
+            // get 0 level root
+            struct pte *lvl_0_root = pageptr(pte1.ppn);
+            
+            // create new table for level 1 pte
+            struct pte *clone_l0 = (struct pte*)alloc_phys_page();
+            clone_l1[j] = ptab_pte(clone_l0, 0);
+
+            // copy all the things in level 0
+            for (int k = 0; k < PTE_CNT; k++)
+            {
+                struct pte pte0 = lvl_0_root[k];
+
+                if (PTE_VALID(pte0) && PTE_GLOBAL(pte0)) {
+                    clone_l0[k] = lvl_0_root[k];
+                    continue;
+                }; // shallow copy global
+
+                // copy all valid pages
+                if (PTE_VALID(pte0)) {
+                    void *cloned_mem = alloc_phys_page();
+                    // copy over deets
+                    memcpy(cloned_mem, pageptr(pte0.ppn), PAGE_SIZE);
+
+                    clone_l0[k] = leaf_pte(cloned_mem, pte0.flags);
+                }
+            }
+
+        }
+    }
+    return ptab_to_mtag(clone, 0);
 }
 
 /*

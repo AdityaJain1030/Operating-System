@@ -196,7 +196,10 @@ int sysexec(int fd, int argc, char **argv) {
 
 int sysfork(const struct trap_frame *tfr) {
     //cp3
-    return 0;
+    // validate the trap frame
+    // then call process fork with it
+    validate_vptr(tfr, sizeof(struct trap_frame), PTE_U | PTE_R | PTE_W);
+    return process_fork(tfr);
 }
 
 /**

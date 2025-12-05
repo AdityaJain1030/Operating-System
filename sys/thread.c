@@ -10,6 +10,7 @@
     @license SPDX-License-identifier: NCSA
 */
 
+#include "memory.h"
 #ifdef THREAD_TRACE
 #define TRACE
 #endif
@@ -34,6 +35,7 @@
 #include "error.h"
 #include "console.h"
 #include <stdarg.h>
+#include "process.h"
 
 // COMPILE-TIME PARAMETERS
 //
@@ -612,8 +614,9 @@ struct thread * create_thread(const char * name) {
 
     thr = kcalloc(1, sizeof(struct thread));
     
-    stack_size = 4000; // change to PAGE_SIZE in mp3
-    stack_lowest = kmalloc(stack_size);
+    stack_size = PAGE_SIZE; // change to PAGE_SIZE in mp3
+    // stack_lowest = kmalloc(stack_size);
+    stack_lowest = alloc_phys_page();
     anchor = stack_lowest + stack_size;
     anchor -= 1; // anchor is at base of stack
     thr->stack_lowest = stack_lowest;
@@ -672,10 +675,11 @@ void running_thread_suspend(void) {
     */
     enable_interrupts();                                    // Documentation requires that we must enable interrupts before calling _thread_swtch
     next->state = THREAD_SELF;
+    if (next->proc != NULL) switch_mspace(next->proc->mtag);    // switch to next process memspace if needed
     struct thread* old = _thread_swtch(next);
     if (old->state == THREAD_EXITED)
     {
-        kfree(old->stack_lowest);                           // free the THREAD's stack!
+        free_phys_page(old->stack_lowest);                           // free the THREAD's stack!
     }
     restore_interrupts(pie);                                // after thread_swtch returns, we are in need "switched" thread, hence we can restore interrrupts
 }

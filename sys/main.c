@@ -23,7 +23,7 @@
 #include "thread.h"
 #include "timer.h"
 
-#define INITEXE "rogue"  // FIXME
+#define INITEXE "fork"  // FIXME
 
 // INITEXE: Controls the kernel program
 
@@ -160,7 +160,7 @@ void run_init(void) {
     struct process *curr = running_thread_process();
     open_file(DEVMNTNAME, "uart1",&curr->uiotab[2]);
     char *argv[] = { INITEXE, "c/a", NULL };   // 
-    process_exec(initexe, 2, argv);
+    process_exec(initexe, 1, argv);
     // elf_load(initexe, &start_trek);
     // start_adele(uart_dev);
 
