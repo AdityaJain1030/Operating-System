@@ -139,7 +139,7 @@ void pipe_write_uio_close(struct uio* uio) {
  * @return Number of bytes written from the buffer to the file system if sucessful, negative error
  * code if error
  */
-long pipe_write_uio_write(struct uio* uio, unsigned long buflen) {
+long pipe_write_uio_write(struct uio* uio, const void *buf, unsigned long buflen) {
     struct pipe_buffer* pipebuf = (struct pipe_buffer*)((char*)uio - offsetof(struct pipe_buffer, writeuio));
     
     if (pipebuf->readers_open == 0) 
@@ -147,7 +147,31 @@ long pipe_write_uio_write(struct uio* uio, unsigned long buflen) {
         return -EPIPE; // No readers, cannot write
     }
 
-    while ()
+    while (pipefull(pipebuf)) 
+    {
+        // Wait until there is space in the buffer
+        // if we say we want to write but the pipe is still open?
+        // so many fricking edge cases. 
+        /*
+            When pipebuf is full, we condaiotn wait on the reader, btu then the reader closes withotu readinf then we need to handlel that
+
+            when reader partially reads some, but then closes and we try to write after we exit then we should reutn bad as well
+        
+        
+        */
+        if (pipebuf->readers_open == 0) 
+        {
+            return -EPIPE; // No readers, cannot write
+        }
+        condition_wait(&pipebuf->not_full);
+    }
+
+
+    // another check, see above
+    if (pipebuf->readers_open == 0) 
+    {
+        return -EPIPE; // No readers, cannot write
+    }
 
 
     // pipe buffer is our source buffer, we direclty use uio->open to reference
@@ -155,12 +179,17 @@ long pipe_write_uio_write(struct uio* uio, unsigned long buflen) {
 
     lock_acquire(&pipebuf->lock);
 
-    while (bytes_written < buflen) {
+    char* srcbuf = (char*) buf;
+    // WE ASSUME THAT USER CAN ONLY SEND IN BYTES LESS THAN 4096! OTHERWISE WE WILL BE BROKEN
+    while (bytes_written < buflen) 
+    {
         // Wait until there is space in the buffer
-        while (((pipebuf->tail + 1) % pipebuf->bufsz) == pipebuf->head) {
-            if (pipebuf->readers_open == 0) {
-                lock_release(&pipebuf->lock);
-                return bytes_written; // No readers, stop writing
+        while (pipefull(pipebuf)) 
+        {
+            if (pipebuf->readers_open == 0) 
+            {
+                lock_release(&pipebuf->lock);           // reader closed premautrley, return error?
+                return -EPIPE; // No readers, stop writing, broken pipe. Should not premautrely close???
             }
             condition_wait(&pipebuf->not_full);
         }
@@ -173,7 +202,6 @@ long pipe_write_uio_write(struct uio* uio, unsigned long buflen) {
         // Signal that the buffer is not empty
         condition_signal(&pipebuf->not_empty);
     }
-
     lock_release(&pipebuf->lock);
     return bytes_written;
 }
