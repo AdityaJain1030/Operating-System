@@ -296,7 +296,7 @@ void create_pipe(struct uio **wptr, struct uio **rptr) {
     condition_init(&pipebuf->not_empty, "pipe_not_empty");
     condition_init(&pipebuf->not_full, "pipe_not_full");
 
-    uio_init1(&pipebuf->writeuio, (*));
+    uio_init1(&pipebuf->writeuio, &pipe_write_uio_intf);
     uio_init1(&pipebuf->readuio, &pipe_read_uio_intf);
     
 }
