@@ -195,6 +195,8 @@ int process_exec(struct uio* exefile, int argc, char** argv) {
 }
 
 int process_fork(const struct trap_frame* tfr) {
+    // FIXME
+    // dont deal with this till cp3
     // we steal the logic for finding open stuff syscall open
     int pid = -1;
     for (pid = 0; pid <= NPROC; pid++)
@@ -236,12 +238,8 @@ int process_fork(const struct trap_frame* tfr) {
     memcpy(ktfr, tfr, sizeof(struct trap_frame));
     int ctid = spawn_thread(NULL, (void *)fork_func, NULL, ktfr);
 
-    thread_set_process(ctid, newproc);
-    newproc->tid = ctid;
-    //TODO: condition_wait here for the fork func to finish wiht the trap frame    
-    //FIXME: we should be returning child tid 
-    
-    return ctid; 
+
+    return 0;
 }
 
 /** \brief
