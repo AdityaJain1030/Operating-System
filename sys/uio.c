@@ -39,15 +39,148 @@ static long nulluio_write(struct uio* uio, const void* buf, unsigned long buflen
 // Pipe stuff
 struct pipe_buffer {
     char* buf;                          // buffer pointer, spec says should be page size
+    unsigned long length;                           // current length of buffer/how many are stored
     struct uio* writeuio;              // uio for writing
     struct uio* readuio;               // uio for reading
-    unsigned long bufsz;                // buffer size
+    unsigned long bufsz;               // size of buffer
     unsigned long head;                 // head is wehre we read, tail is where we write
     unsigned long tail;                 // tiail is where we write
     struct lock lock;               // do we actually need locking??? Art pls answer   
     struct condition not_empty;         // condiiton for pipe intenral buffer not empty
     struct condition not_full;          // condition for pipe internal buffer not full
+    int writers_open;
+    int readers_open;
 };
+/*
+    Pipe is basically another "UIO" device, but not really. It acts as connector but still interfaces through the uio interface!
+
+    Sepearte writeuio and readuio because we need a way to differentiate
+*/
+
+static const struct uio_intf pipe_write_uio_intf = {
+    .close = &pipe_write_uio_close,
+    .read = NULL,
+    .write = &pipe_write_uio_write,
+    .cntl = NULL
+};
+
+
+static const struct uio_intf pipe_read_uio_intf = {
+    .close = &pipe_read_uio_close,
+    .read = &pipe_read_uio_read,
+    .write = NULL,
+    .cntl = NULL
+};
+
+
+
+
+//
+// Internal Pipe Functions
+// Referenced KTFS style like docs
+
+int pipefull (struct pipe_buffer* pipebuf)
+{
+    return pipebuf->length == pipebuf->bufsz;
+}
+
+int pipeempty (struct pipe_buffer* pipebuf)
+{
+    return pipebuf->length == 0;
+}
+
+
+
+
+/**
+ * @brief Closes the file that is represented by the uio struct
+ * @param uio The file io to be closed
+ * @return None
+ */
+/*
+WHen we close we check if the reader is closed if it is then we can free the underlying memory
+
+
+*/
+void pipe_write_uio_close(struct uio* uio) {
+    struct pipe_buffer* pipebuf = (struct pipe_buffer*)((char*)uio - offsetof(struct pipe_buffer, writeuio));
+
+
+    int free = 0;       // suggestion from ART, keeps code cleaner
+
+    lock_acquire(&pipebuf->lock);
+    pipebuf->writers_open--;
+    if (pipebuf->writers_open == 0) {
+        // Wake up any readers waiting for data
+        // this is an edge case, we need to wake them up as otherwise sicne we have 0 writers we have no way to wake up the reader
+        // for example say we write "Hello". And then reader reads but then pip_write_uio_close is called. No way to "wake up" reader to return EOF
+        if (pipebuf->readers_open > 0) 
+        {
+            condition_broadcast(&pipebuf->not_empty);
+        }
+        else    // no readers open, we can free the struct
+        {
+            free = 1;                                    // free the pipe buffer struct, need the free variable so we dont free before we release the lock
+        }
+    }
+    lock_release(&pipebuf->lock);
+    if (free) 
+    {
+        free_phys_page((unsigned long)pipebuf->buf);   // free the physical page
+        kfree(pipebuf);                                    // free the pipe buffer struct
+    }
+}
+
+
+/**
+ * @brief Write data from the provided argument buffer into file attached to uio
+ * @param uio The file to be written to
+ * @param len Number of bytes to write from the buffer to the file
+ * @return Number of bytes written from the buffer to the file system if sucessful, negative error
+ * code if error
+ */
+long pipe_write_uio_write(struct uio* uio, unsigned long buflen) {
+    struct pipe_buffer* pipebuf = (struct pipe_buffer*)((char*)uio - offsetof(struct pipe_buffer, writeuio));
+    
+    if (pipebuf->readers_open == 0) 
+    {
+        return -EPIPE; // No readers, cannot write
+    }
+
+    while ()
+
+
+    // pipe buffer is our source buffer, we direclty use uio->open to reference
+    unsigned long bytes_written = 0;
+
+    lock_acquire(&pipebuf->lock);
+
+    while (bytes_written < buflen) {
+        // Wait until there is space in the buffer
+        while (((pipebuf->tail + 1) % pipebuf->bufsz) == pipebuf->head) {
+            if (pipebuf->readers_open == 0) {
+                lock_release(&pipebuf->lock);
+                return bytes_written; // No readers, stop writing
+            }
+            condition_wait(&pipebuf->not_full);
+        }
+
+        // Write a byte to the buffer
+        pipebuf->buf[pipebuf->tail] = srcbuf[bytes_written];
+        pipebuf->tail = (pipebuf->tail + 1) % pipebuf->bufsz;
+        bytes_written++;
+
+        // Signal that the buffer is not empty
+        condition_signal(&pipebuf->not_empty);
+    }
+
+    lock_release(&pipebuf->lock);
+    return bytes_written;
+}
+
+
+
+
 
 
 
@@ -117,11 +250,18 @@ struct uio* create_null_uio(void) {
 void create_pipe(struct uio **wptr, struct uio **rptr) {
     // ...
     // we allocate the pipe on the heap??? idk bro I am so LOST
+    // intilaize all the inetneral members of the struct
     struct pipe_buffer * pipebuf = kcalloc(1, sizeof(struct pipe_buffer));
     pipebuf->bufsz = PAGE_SIZE;
     pipebuf->buf = (char*) alloc_phys_pages(1);         // we allocate one physical page, since the buffer will be accessed in kenrel we are good nad can direct memory access
     pipebuf->head = 0;
     pipebuf->tail = 0;                                  // initially head and tail are both 0
+    pipebuf->writers_open = 1;
+    
+    pipebuf->readers_open = 1;
+
+    pipebuf->length = 0;
+
 
     // bro idk if we lock or not, 
     //lock_init(&pipebuf->lock);
