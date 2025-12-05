@@ -207,9 +207,6 @@ int process_fork(const struct trap_frame* tfr) {
         // break after pid is found
         if (proctab[pid] == NULL) break;
     }
-    //TODO: initialize the condition here
-    //TODO/FIXME: the next line should be the correct thing to do, but perhaps we need to be safer with how we pass in the tfr (ie memcpy into a new tfr and then use that one)
-    //int child_tid = thread_spawn("fork_func", fork_func, tfr); //NOTE: tfr is the trap frame we want the child to spawn using 
 
     struct process *proc = current_process(); 
 
@@ -227,19 +224,18 @@ int process_fork(const struct trap_frame* tfr) {
 
     // duplicate the memspace
     newproc->mtag = clone_active_mspace();
+    // u mode calls fork -> we enter s mode fork handler (process_fork) -> process_fork creates a child thread at fork_func using the original tfr (we dont need to clone YET im 99% sure) -> process_fork condition waits for child to start running -> we wait for a few isr thread switches till child starts at fork_func -> child has to DEEP COPY tfr because the actual MEMORY any pointers on tfr->sp will not be accessible (child in UMode will not have the parents vmas) -> child says condition done with the old tfr (but does not return control to parent yet) -> we trap frame jump into child and wait for pre emption to give control back to parent
+    // create a new condition 
+    struct condition wait_for_child;
+    condition_init(&wait_for_child, "fork wait");
+    int ctid = spawn_thread(NULL, (void *)fork_func, &wait_for_child, tfr);
 
-    // now this is the interesting part...
-    // when we fork this does not run right away, since we
-    // DONT TRAP FRAME JUMP!!! So we have to make sure the trap
-    // lives longer than the function... we are given a pointer but
-    // that pointer can be edited by anyone
-    // so we should take ownership of it
-    struct trap_frame *ktfr = kmalloc(sizeof(struct trap_frame));
-    memcpy(ktfr, tfr, sizeof(struct trap_frame));
-    int ctid = spawn_thread(NULL, (void *)fork_func, NULL, ktfr);
-
-
-    return 0;
+    thread_set_process(ctid, newproc);
+    newproc->tid = ctid;
+    //TODO: condition_wait here for the fork func to finish wiht the trap frame    
+    //FIXME: we should be returning child tid 
+    condition_wait(&wait_for_child);
+    return ctid; 
 }
 
 /** \brief
@@ -352,17 +348,13 @@ int build_stack(void* stack, int argc, char** argv) {
  */
 void fork_func(struct condition* done, struct trap_frame* tfr) {
     // FIXME
-    
-    // ok this looks like bullshit but I promise this is for a reason
-    // we kmalloced the trap frame earlier to protect it from the world
-    // now we are gonna do the stack trick where we put it on the stack so we can forget abt it
-    
-    // TODO: condition broadcast here
+    // see process_fork for comments
     struct trap_frame ktfr;
     memcpy(&ktfr, tfr, sizeof(struct trap_frame));
-    kfree(tfr);
+    condition_broadcast(done);
     // ok we know for sure we need to make it out
     void * kernel_stack = running_thread_stack_base();
+    ktfr.a0 = 0; // child returns 0 from fork
     //FIXME: shouldn't we be setting a0 to 0 here? maybe I'm trippin
-    trap_frame_jump(tfr, kernel_stack);
+    trap_frame_jump(&ktfr, kernel_stack);
 }

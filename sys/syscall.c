@@ -28,6 +28,8 @@
 #include "timer.h"
 #include "uio.h"
 
+
+
 // EXPORTED FUNCTION DECLARATIONS
 //
 
@@ -194,7 +196,10 @@ int sysexec(int fd, int argc, char **argv) {
 
 int sysfork(const struct trap_frame *tfr) {
     //cp3
-    return 0;
+    // validate the trap frame
+    // then call process fork with it
+    validate_vptr(tfr, sizeof(struct trap_frame), PTE_U | PTE_R | PTE_W);
+    return process_fork(tfr);
 }
 
 /**
@@ -206,6 +211,16 @@ int sysfork(const struct trap_frame *tfr) {
 
 int syswait(int tid) { 
     // cp3
+
+    // based off of DKW SU25 lecture posted on Piazza
+    // LXDL
+
+    if (0 <= tid)
+        return thread_join(tid);    // thread join will hold the proeprr retun value
+    else
+        return -EINVAL;
+
+
     return 0;
 }
 
@@ -572,5 +587,23 @@ int syspipe(int *wfdptr, int *rfdptr) {
 
 int sysuiodup(int oldfd, int newfd) {
     // cp3
-    return 0;
+    // LXDL sysuiodup
+
+    // replaces old file desciptor with a new one
+    /*
+    
+        make sure to check if oldfd exists
+    */
+    if (oldfd < 0 || newfd < 0) return -EBADFD;
+    if (oldfd >= PROCESS_UIOMAX || newfd >= PROCESS_UIOMAX) return -EBADFD;
+
+
+
+    struct process *running = current_process();
+
+    // check if oldfd actually has something or if newfd is already taken
+    if (running->uiotab[oldfd] == NULL || running->uiotab[newfd] != NULL) return -EBADFD;
+    running->uiotab[newfd] = running->uiotab[oldfd];
+    uio_addref(running->uiotab[newfd]);   // dont forget to increment refcnt
+    return newfd;
 }
