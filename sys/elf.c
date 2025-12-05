@@ -179,7 +179,7 @@ int elf_load(struct uio* uio, void (**eptr)(void)) {
 
         //CP2 IMPL: we now need to deal with all the possibilitied and edgecases introduced by mapping into the userland
         if (phdr.p_vaddr < 0x0C0000000UL || (phdr.p_vaddr + phdr.p_memsz) > 0x100000000UL){ //made sure to typecast to UL this time because of MSB
-            trace("nice try diddy I see u trying to touch addresses outside of USR_START_VMA\n");
+            trace("nice try diddy I see u trying to touch addresses outside of USR_START_VMA\n");   // bro wth is this comment ;(
             return -EBADFMT;
         }
         // if (phdr.p_align > 1) {

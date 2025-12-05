@@ -34,17 +34,24 @@ static long nulluio_write(struct uio* uio, const void* buf, unsigned long buflen
 //
 
 
+// more pipe stuff
+
 // Pipe stuff
 struct pipe_buffer {
-    struct 
     char* buf;                          // buffer pointer, spec says should be page size
+    struct uio* writeuio;              // uio for writing
+    struct uio* readuio;               // uio for reading
     unsigned long bufsz;                // buffer size
     unsigned long head;                 // head is wehre we read, tail is where we write
     unsigned long tail;                 // tiail is where we write
-    struct lock lock;
+    struct lock lock;               // do we actually need locking??? Art pls answer   
     struct condition not_empty;         // condiiton for pipe intenral buffer not empty
     struct condition not_full;          // condition for pipe internal buffer not full
 };
+
+
+
+
 
 void uio_close(struct uio* uio) {
     debug("uio_close: refcnt=%d, has_close=%d", uio->refcnt, (uio->intf->close != NULL));
@@ -109,7 +116,17 @@ struct uio* create_null_uio(void) {
 
 void create_pipe(struct uio **wptr, struct uio **rptr) {
     // ...
+    // we allocate the pipe on the heap??? idk bro I am so LOST
+    struct pipe_buffer * pipebuf = kcalloc(1, sizeof(struct pipe_buffer));
+    pipebuf->bufsz = PAGE_SIZE;
+    pipebuf->buf = (char*) alloc_phys_pages(1);         // we allocate one physical page, since the buffer will be accessed in kenrel we are good nad can direct memory access
+    pipebuf->head = 0;
+    pipebuf->tail = 0;                                  // initially head and tail are both 0
 
+    // bro idk if we lock or not, 
+    //lock_init(&pipebuf->lock);
+    condition_init(&pipebuf->not_empty, "pipe_not_empty");
+    condition_init(&pipebuf->not_full, "pipe_not_full");
 }
 
 
