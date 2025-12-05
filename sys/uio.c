@@ -114,7 +114,9 @@ void pipe_write_uio_close(struct uio* uio) {
         // Wake up any readers waiting for data
         // this is an edge case, we need to wake them up as otherwise sicne we have 0 writers we have no way to wake up the reader
         // for example say we write "Hello". And then reader reads but then pip_write_uio_close is called. No way to "wake up" reader to return EOF
-        if (pipebuf->readers_open > 0) 
+        // make sure to append EOF?
+        int EOF_written = pipe_write_uio_write(pipebuf->writeuio, "", 1); // write EOF character
+        if (pipebuf->readers_open > 0 && !pipeempty(pipebuf)) 
         {
             condition_broadcast(&pipebuf->not_empty);
         }
@@ -139,6 +141,11 @@ void pipe_write_uio_close(struct uio* uio) {
  * @return Number of bytes written from the buffer to the file system if sucessful, negative error
  * code if error
  */
+/*
+
+We write byte by byte (I know slow), however we can chunk this if you need to. Just need to be careful wtih edge cases
+
+*/
 long pipe_write_uio_write(struct uio* uio, const void *buf, unsigned long buflen) {
     struct pipe_buffer* pipebuf = (struct pipe_buffer*)((char*)uio - offsetof(struct pipe_buffer, writeuio));
     
@@ -208,8 +215,64 @@ long pipe_write_uio_write(struct uio* uio, const void *buf, unsigned long buflen
 
 
 
+void pipe_read_uio_close(struct uio* uio) 
+{
+    struct pipe_buffer* pipebuf = (struct pipe_buffer*)((char*)uio - offsetof(struct pipe_buffer, readuio));
 
 
+
+}
+
+
+
+
+long pipe_read_uio_read(struct uio* uio, void* buf, unsigned long bufsz)
+{
+    struct pipe_buffer* pipebuf = (struct pipe_buffer*)((char*)uio - offsetof(struct pipe_buffer, readuio));
+
+    if (pipebuf->writers_open == 0 && pipeempty(pipebuf)) 
+    {
+        return 0; // No writers and buffer empty, EOF
+    }
+
+    // if no writers are open we just read till end of buffer
+    if (pipebuf->writers_open == 0 && pipeempty(pipebuf)) 
+    {
+        return 0; // No writers and buffer empty, EOF idk man
+    }
+
+    unsigned long bytes_read = 0;
+
+    lock_acquire(&pipebuf->lock);
+
+    char* dstbuf = (char*) buf;
+
+    while (bytes_read < bufsz) 
+    {
+        // Wait until there is data in the buffer
+        while (pipeempty(pipebuf)) 
+        {
+            if (pipebuf->writers_open == 0) 
+            {
+                // not sure if we APPEND EOF here
+                lock_release(&pipebuf->lock);
+                return bytes_read; // No writers, return what we have read so far (could be 0)
+            }
+            condition_wait(&pipebuf->not_empty);
+        }
+
+        // Read a byte from the buffer
+        dstbuf[bytes_read] = pipebuf->buf[pipebuf->head];
+        pipebuf->head = (pipebuf->head + 1) % pipebuf->bufsz;
+        bytes_read++;
+
+        // Signal that the buffer is not full
+        condition_signal(&pipebuf->not_full);
+    }
+    // frick idk what to do about EOF
+    lock_release(&pipebuf->lock);
+    return bytes_read;
+}
 
 
 
