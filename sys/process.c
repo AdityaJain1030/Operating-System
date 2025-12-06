@@ -8,10 +8,10 @@
 /*!
  * @brief Enables trace messages for process.c
  */
-#include <stdint.h>
-#include <stdlib.h>
-#include <sys/_types.h>
-#include <sys/errno.h>
+// #include <stdint.h>
+// #include <stdlib.h>
+// #include <sys/_types.h>
+// #include <sys/errno.h>
 #ifdef PROCESS_TRACE
 #define TRACE
 #endif
@@ -207,7 +207,7 @@ int process_fork(const struct trap_frame* tfr) {
     for (pid = 0; pid <= NPROC; pid++)
     {
         // there are no free procs
-        if (pid == NPROC) return -ENOEXEC;
+        if (pid == NPROC) return -EBUSY;
 
         // break after pid is found
         if (proctab[pid] == NULL) break;
