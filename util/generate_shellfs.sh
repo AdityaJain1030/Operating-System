@@ -1,1 +1,1 @@
-./mkfs_ktfs ../sys/ktfs.raw 8M 16 ../usr/bin/* ../usr/games/*
+./mkfs_ktfs ../sys/ktfs.raw 8M 20 ../usr/bin/* ../usr/games/*

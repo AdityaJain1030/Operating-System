@@ -23,13 +23,13 @@ ifeq ($(UMODE), 1)
 	ULIB_OBJS += start.o
 	ULIB_LD = umode.ld
 endif
-
-ALL_TARGETS = \
-	hello \
-	exec_bomb \
-	tests \
-	fork \
-	shell
+ALL_TARGETS = $(patsubst progs/%.c, %, $(wildcard progs/*.c))
+# ALL_TARGETS = \
+# 	hello \
+# 	exec_bomb \
+# 	tests \
+# 	fork \
+# 	shell
 CFLAGS = -Wall -fno-omit-frame-pointer -ggdb -gdwarf-2
 CFLAGS += -mcmodel=medany -fno-pie -no-pie -march=rv64g -mabi=lp64d
 CFLAGS += -ffreestanding -fno-common -nostdlib -mno-relax

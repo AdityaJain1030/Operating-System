@@ -65,7 +65,7 @@ int parse(char* buf, char** argv, char **readinf, char** readoutf) {
 
 				case FOUT:
 					// FIXME
-					head++;
+					// head++;
 					while(*head != '\0')
 					{
 						if (*head != ' ') break;
@@ -86,7 +86,7 @@ int parse(char* buf, char** argv, char **readinf, char** readoutf) {
 					continue;
 					
 				case FIN:
-					head++;
+					// head++;
 					while(*head != '\0')
 					{
 						if (*head != ' ') break;
@@ -155,8 +155,8 @@ void main(void)
 		// printf("%d", argc);
 		
 		// print out all the buf, argv, readinf, and readoutf in console
-		// print_parsed_command(buf, argv, readinf, readoutf, argc);		
-		// continue;
+		print_parsed_command(buf, argv, readinf, readoutf, argc);		
+		continue;
 		
 		if (argc == 0) continue;
 		if (argc > ARG_MAX) continue;
@@ -185,12 +185,10 @@ void main(void)
 		else
 			snprintf(name, 100, "c/%s", argv[0]);
 		
-		// designating 8 as the file to open... not like it matters since we reset anyway
-		_close(8);
-		int ret = _open(8, name);
-		if (ret < 0)
+		int rett = _open(-1, name);
+		if (rett < 0)
 		{
-			printf("bad cmd file %s with error code %d \n", name, ret);
+			printf("bad cmd file %s with error code %d \n", name, rett);
 			_exit();
 		}
 		
@@ -238,7 +236,7 @@ void main(void)
 
 		//execute
 
-		_exec(8, argc, argv);
+		_exec(rett, argc, argv);
 		printf("Exec not working cro");
 	}
 }

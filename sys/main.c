@@ -23,7 +23,7 @@
 #include "thread.h"
 #include "timer.h"
 
-#define INITEXE "goldshell"  // FIXME
+#define INITEXE "shell"  // FIXME
 
 // INITEXE: Controls the kernel program
 
