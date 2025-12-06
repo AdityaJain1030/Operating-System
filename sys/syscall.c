@@ -90,6 +90,7 @@ void handle_syscall(struct trap_frame *tfr) {
  */
 
 int64_t syscall(const struct trap_frame *tfr) {
+    alarm_preempt();
     switch (tfr->a7) {
         case SYSCALL_EXIT:
             return sysexit();

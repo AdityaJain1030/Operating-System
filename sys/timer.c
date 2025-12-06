@@ -13,6 +13,7 @@
 #define DEBUG
 #endif
 
+#include "string.h"
 #include "timer.h"
 #include "thread.h"
 #include "riscv.h"
@@ -24,6 +25,8 @@
 
 // for kfree
 #include "heap.h"
+
+#define TWENTYMS (20 * (TIMER_FREQ / 1000))
 
 // EXPORTED GLOBAL VARIABLE DEFINITIONS
 // 
@@ -91,8 +94,7 @@ void alarm_init(struct alarm * al, const char * name) {
  *    - Updates twake and possibly enables timer interrupts.
  */
 void alarm_sleep(struct alarm * al, unsigned long long tcnt) {
-    unsigned long long now;
-    struct alarm * prev;
+    unsigned long long now; struct alarm * prev;
     int pie;
     now = rdtime();
 
@@ -134,6 +136,60 @@ void alarm_sleep(struct alarm * al, unsigned long long tcnt) {
     set_stcmp(sleep_list->twake);                       //  set to the first one of the sleep list
     csrs_sie(RISCV_SIE_STIE);                           // enable timer interrupts as we have added an alarm
     condition_wait(&(al->cond));                        // suspend alarm until wake-up
+    restore_interrupts(pie);
+}
+
+                                            //DONE: apparently these executions are on the scale of microseconds
+void alarm_preempt(){ //lowkey always 20 ms, if on entry to function maybe more depending on how fast rv64 asm instructions execute on qemu???
+    trace("%s()", __func__);
+    trace("%d", (csrr_sstatus() & RISCV_SSTATUS_SPP));
+
+    struct alarm * pal = kcalloc(1, sizeof(struct alarm));
+    alarm_init(pal, "pp"); //specific label given only to preemptive alarms
+    
+    unsigned long long now; struct alarm * prev;
+    int pie;
+    now = rdtime();
+
+    // If the tcnt is so large it wraps around, set it to UINT64_MAX
+
+    if (UINT64_MAX - pal->twake < TWENTYMS)
+        pal->twake = UINT64_MAX;
+    else
+        pal->twake += TWENTYMS;
+    
+    // If the wake-up time has already passed, return
+
+    if (pal->twake < now)
+        return;
+    
+    
+    
+    // Critical Section: Interrupts Disabled as modifying the sleep_list
+    pie = disable_interrupts();
+    // Iterate through alarm sleep_list to find position where to insert the alarm
+    struct alarm * head = sleep_list;
+    prev = NULL;
+    while (head != NULL && head->twake < pal->twake)
+    {
+        prev = head;
+        head = head->next;
+    }
+    if (prev != NULL)
+    {
+        prev->next = pal;
+        pal->next = head;
+    }
+    else
+    {
+        pal->next = sleep_list;
+        sleep_list = pal;
+    }
+    // set the stcmp
+    set_stcmp(sleep_list->twake);                       //  set to the first one of the sleep list
+    csrs_sie(RISCV_SIE_STIE);                           // enable timer interrupts as we have added an alarm
+
+    //condition_wait(&(pal->cond)) the biggest functional difference between this function and alarm sleep is that this function doesn't condition wait. its a yield alarm not a wake alarm (yes I can cook)
     restore_interrupts(pie);
 }
 
@@ -200,11 +256,21 @@ void handle_timer_interrupt(void) {
     // csrs_sie set bit
     // csrc_sie clear bit
     // Check the sleep list and wake all threads whose wake-up time has arrived
+    
+    int yield_flag = 0;
     while (head != NULL && head->twake <= now)
     {
-        condition_broadcast(&(head->cond));
-        next = head->next;
-        head = next;
+        if (strncmp(head->cond.name, "pp", 2) == 0) {
+            yield_flag = 1;
+            next = head->next;
+            kfree(head);
+            head = next;
+
+        }else {
+            condition_broadcast(&(head->cond));
+            next = head->next;
+            head = next;
+        }
     }
 
     // Check to see if sleep_list is empty. If so disable timer interrupts otherwise timer_isr may 
@@ -219,5 +285,18 @@ void handle_timer_interrupt(void) {
         set_stcmp(sleep_list->twake);     //  set threshold to check to be the first thread whose twake is smallest
     }
 
-
+        trace("prev priv mode %d", csrr_sstatus() & RISCV_SSTATUS_SPP);
+        trace("the thread process address:%p", running_thread_process());
+    //IF we came from U-mode and a preemptive alarm went off, then yeet the thread onto the running thread list
+    //otherwise its just a noop
+    
+    if ((csrr_sstatus() & RISCV_SSTATUS_SPP)==0  && yield_flag == 1){
+        trace("%d", csrr_sstatus() & RISCV_SSTATUS_SPP);
+        running_thread_yield();
+    }
+    
+    // if (running_thread_process()  && yield_flag == 1){
+    //     trace("%d", csrr_sstatus() & RISCV_SSTATUS_SPP);
+    //     running_thread_yield();
+    // }
 }

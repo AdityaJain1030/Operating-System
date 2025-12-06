@@ -8,10 +8,10 @@
 /*!
  * @brief Enables trace messages for process.c
  */
-// #include <stdint.h>
-// #include <stdlib.h>
-// #include <sys/_types.h>
-// #include <sys/errno.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <sys/_types.h>
+#include <sys/errno.h>
 #ifdef PROCESS_TRACE
 #define TRACE
 #endif
@@ -25,6 +25,7 @@
 
 #include "process.h"
 
+#include "timer.h"
 #include "conf.h"
 #include "elf.h"
 #include "error.h"
@@ -146,6 +147,8 @@ int process_exec(struct uio* exefile, int argc, char** argv) {
     // i dont think we need this since we already tested the elf above
     if (err < 0) {
         free_phys_page(newpage);
+
+        trace("the error code is %d", err);
         return err;
     }
 
@@ -187,6 +190,8 @@ int process_exec(struct uio* exefile, int argc, char** argv) {
 
     // 7. call trap jump with pointers to trap frame and sscratch
     void* kernel_stack = running_thread_stack_base();
+
+    alarm_preempt();
     trap_frame_jump(&trap, kernel_stack); // dunno what to set sscratch to yet
 
     // how do we free the trap frame??? 
@@ -202,7 +207,7 @@ int process_fork(const struct trap_frame* tfr) {
     for (pid = 0; pid <= NPROC; pid++)
     {
         // there are no free procs
-        if (pid == NPROC) return -EBUSY;
+        if (pid == NPROC) return -ENOEXEC;
 
         // break after pid is found
         if (proctab[pid] == NULL) break;
@@ -356,5 +361,6 @@ void fork_func(struct condition* done, struct trap_frame* tfr) {
     void * kernel_stack = running_thread_stack_base();
     ktfr.a0 = 0; // child returns 0 from fork
     //FIXME: shouldn't we be setting a0 to 0 here? maybe I'm trippin
+    alarm_preempt();
     trap_frame_jump(&ktfr, kernel_stack);
 }

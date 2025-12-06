@@ -102,6 +102,10 @@ struct ktfs_file_records{
 };
 
 
+struct ktfs_listing_uio {
+    struct uio base;
+    const struct ktfs_file_records * records;
+};
 
 struct ktfs_file_records * records; //our singular book-keeping system for files
 
@@ -140,6 +144,10 @@ static const struct uio_intf initial_file_uio_intf = {
     .write = &ktfs_store    
 };
 
+static const struct uio_intf ktfs_listing_uio_intf  = {
+    .close = &ktfs_listing_close,
+    .read = &ktfs_listing_read
+};
 
 //the next two are exactly what it sounds like
 //NOTE: db_blk_num/inoed_slot_num is the DATA_BLOCK_INDEX/INODE_SLOT_INDEX of the block we're trying to free, not the absolute index like we've so often used for other function
@@ -646,6 +654,15 @@ int ktfs_open(struct filesystem* fs, const char* name, struct uio** uioptr) { //
     if (strlen(name) > KTFS_MAX_FILENAME_LEN) return -EINVAL; //strlen doesn't count the null terminator so this guardcase is right. the strlen(name) should not exceed the maxlen
 
     if (!ktfs) return -EINVAL; //either the file mount hasn't happened or its in the process of happening
+    
+    //NOTE: CP3 ADDITION: LISTING!!!!!!!!!
+    if (strncmp(name, " ", strlen(name)) == 0){
+        struct ktfs_listing_uio * ls;
+        ls = kcalloc(1, sizeof(*ls));
+        ls->records = records;
+        *uioptr  = uio_init1(&ls->base, &ktfs_listing_uio_intf);
+        return 0;
+    }
 
     //"search for inode that matches name" section //
     int i = 0;
@@ -1195,7 +1212,10 @@ int ktfs_cntl(struct uio* uio, int cmd, void* arg) {
     //uint32_t size = file->inode_data.size;
     //trace("%s : size: %d\n", __func__, size);
 
-    if (!file->opened) return -EINVAL;
+    if (!file->opened) {
+        trace("file wasn't opened yet");
+        return -EINVAL;
+    }
 
     switch (cmd)
     {
@@ -1264,7 +1284,9 @@ void ktfs_flush(struct filesystem* fs) {
  * @return None
  */
 void ktfs_listing_close(struct uio* uio) {
-    // FIXME
+    struct ktfs_listing_uio *const ls = (struct fs_listing_uio *)uio;
+    kfree(ls);
+    //TODO: This implementation is actually quite odd (ripped off of devfs but I have the same questions regardless). who calls uio_close?????
     return;
 }
 
@@ -1277,7 +1299,22 @@ void ktfs_listing_close(struct uio* uio) {
  * @return The size written to the buffer
  */
 long ktfs_listing_read(struct uio* uio, void* buf, unsigned long bufsz) {
-    // FIXME
-    return -ENOTSUP;
+    struct ktfs_listing_uio *const ls = (struct ktfs_listing_uio *)uio;
+
+    if (ls->records == NULL) return -EINVAL;
+
+    int nfiles = ktfs->max_inode_count;
+
+    int ncpy = 0;//number of bytes copied
+    for (int i = 0; i < nfiles; i++){ 
+        char * name = ls->records->filetab[i]->dentry.name;
+        if (ncpy+strlen(name)+1 >= bufsz) break; //TODO: make sure this is right.... I mean the only difference I see in impl is whether i output them as seperate stirngs or one big string of FILE_NAME_MAX_LEN size
+        memcpy((char *)buf+ncpy, name, strlen(name));
+        memset((char *)buf+(ncpy+strlen(name)+1), 0, 1);//note: accounted for the null-terminator here
+        ncpy += strlen(name)+1;
+    
+    }
+
+    return ncpy;
 }
 

@@ -4,6 +4,8 @@
 // SPDX-License-identifier: NCSA
 //
 
+#include "plic.h"
+#include <stddef.h>
 #ifdef UART_TRACE
 #define TRACE
 #endif
@@ -14,8 +16,7 @@
 
 #include "conf.h"
 #include "misc.h"
-#include "assert.h"
-//#include "uart.h"
+#include "uart.h"
 #include "devimpl.h"
 #include "intr.h"
 #include "heap.h"
@@ -99,8 +100,7 @@ struct uart_serial {
 
     struct ringbuf rxbuf;
     struct ringbuf txbuf;
-
-    struct lock lock;
+    struct lock rq_lock ; // lock
 };
 
 // INTERNAL FUNCTION DEFINITIONS
@@ -162,7 +162,7 @@ void attach_uart(void * mmio_base, int irqno) {
 
     condition_init(&uart->rxbnotempty, "uart.rxnotempty");
     condition_init(&uart->txbnotfull, "uart.txnotfull");
-    lock_init(&uart->lock);
+    lock_init(&uart->rq_lock);
 
     // Initialize hardware
 
@@ -174,38 +174,20 @@ void attach_uart(void * mmio_base, int irqno) {
     // fence o,o ?
     uart->regs->lcr = 0; // DLAB=0
 
-    serial_init(&uart->base, &uart_serial_intf);        // initalizes interfaces
-    register_device(UART_DEVNAME, DEV_SERIAL, uart);    // register device with system so it can be found
+    serial_init(&uart->base, &uart_serial_intf);
+    register_device(UART_DEVNAME, DEV_SERIAL, uart);
 }
-/* int uart_serial_open(struct serial *ser)
- * Inputs:
- *    struct serial *ser - Pointer to the serial structure representing the UART device
- * Outputs: None
- * Return Value:
- *    0       - Success
- *   -EBUSY   - The UART serial interface is already open
- * Function: Opens the specified UART serial interface for communication. Initializes
- *            the receive and transmit buffers, clears any stale data by reading
- *            from the RBR register, enables the data-ready interrupt, and registers
- *            the UART interrupt handler. Marks the serial interface as opened using
- *            the 'opened' flag to prevent duplicate opens.
- * Side Effects:
- *    - Modifies UART device registers.
- *    - May configure PLIC to enable interrupts for device
- *    - Updates the serial structure state (e.g., buffers and 'opened' flag).
- */
+
 int uart_serial_open(struct serial * ser) {
     struct uart_serial * const uart =
         (void*)ser - offsetof(struct uart_serial, base);
 
     trace("%s()", __func__);
-
-    lock_acquire(&uart->lock);
-    if (uart->opened) {
-        lock_release(&uart->lock);
+    if (uart->opened)
+    {
         return -EBUSY;
     }
-
+    
     // Reset receive and transmit buffers
     
     rbuf_init(&uart->rxbuf);
@@ -216,196 +198,134 @@ int uart_serial_open(struct serial * ser) {
     uart->regs->rbr; // forces a read because uart->regs is volatile
 
     // Enable interrupts when data ready (DR) status asserted
+    uart->regs->ier = IER_DRIE;
+  
+    //irqno is also srcno, set prio to some non-zero, isr function, aux is just the serial struct
+    enable_intr_source(uart->irqno, UART_INTR_PRIO, uart_isr, uart);
 
-    uart->opened = 1;
-    enable_intr_source(uart->irqno, UART_INTR_PRIO, uart_isr, uart);    // enable interrupt source
-    uart->regs->ier |= IER_DRIE; // enable DR interrupt
-
-    lock_release(&uart->lock);
+    uart->opened = 1; //marks the device as opened 
     return 0;
 }
-/* void uart_serial_close(struct serial *ser)
- * Inputs:
- *    struct serial *ser - Pointer to the serial structure representing the UART device
- * Outputs: None
- * Return Value: None
- * Function: Closes the specified UART. Disables UART communication
- *            by disabling all device interrupts, unregistering the device as needed,
- *            and marking the serial interface as closed using the 'opened' flag.
- *            If the serial interface is not currently open, the function performs no action.
- * Side Effects:
- *    - Disables UART hardware interrupts by configuring the PLIC
- *    - Modifies the serial structure state (e.g., 'opened' flag).
- */
+
 void uart_serial_close(struct serial * ser) {
     struct uart_serial * const uart =
         (void*)ser - offsetof(struct uart_serial, base);
 
     trace("%s()", __func__);
-    lock_acquire(&uart->lock);
-    if (!uart->opened) {
-        lock_release(&uart->lock);
-        return;
+    if(!uart->opened) 
+    {
+        return; //if the serial hasn't been opened yet this function does nothing.
     }
+
+    //uart->regs->ier= 0; //disables all interrupts from the device by clearing the IER register. (disable_intr_source doesn't)
+
     disable_intr_source(uart->irqno);
-    uart->regs->ier = 0;     // disable all interrupts
-    uart->opened = 0;
-    lock_release(&uart->lock);
+    //disable_intr_source disables the source on PLIC
+    //as well as both the isr funct and aux in the isrtab
+
+    uart->opened = 0; //marks the device as closed
 }
 
-/* int uart_serial_recv(struct serial *ser, void *buf, unsigned int bufsz)
- * Inputs:
- *    struct serial *ser  - Pointer to the UART serial interface structure
- *    void *buf           - Pointer to the buffer to store received data
- *    unsigned int bufsz  - Maximum number of bytes to read from the UART
- * Outputs:
- *    buf - Filled with up to bufsz bytes of received data
- * Return Value:
- *    >= 0      - Number of bytes successfully read
- *    -EINVAL   - The specified UART serial interface is not currently open
- * Function: Reads data from the UART receive ring buffer and copies it into the 
- *            provided buffer. The number of bytes read will be between 1 and 
- *            bufsz, inclusive. If the buffer is empty, the thread will condition wait until rxbuf is not empty
- * Side Effects:
- *    - May suspend the calling thread if no data is available
- *    - Modifies the receive ring buffer and potentially the serial structure state.
- *    - Enables UART data-ready interrupts (modifying the IER register of UART)
- */
+
 int uart_serial_recv(struct serial * ser, void * buf, unsigned int bufsz) {
-    
-     struct uart_serial * const uart =
-        (void*)ser - offsetof(struct uart_serial, base);
-
-    lock_acquire(&uart->lock);
+    struct uart_serial * uart = 
+        (void *)ser - offsetof(struct uart_serial, base);
+    lock_acquire(&uart->rq_lock);
     if (!uart->opened) {
-        lock_release(&uart->lock);
-        return -EINVAL;
+        lock_release(&uart->rq_lock);
+        return -EINVAL; //if the serial hasn't been opened yet we return an error. 
     }
 
-    char* dstbuf = (char*) buf;
     
-    int i = 0;
-    // Critical Section: Interrupt could occur between checking if rbuf_empty and condition_waiting
-    // Don't want to condition_wait on a condition that already occured
+    //if (bufsz <1) return -ENOTSUP; //the bufsz shouldn't be less than the blksz
+    
+    if (bufsz < 1) {
+        lock_release(&uart->rq_lock);
+        return 0;//Fix to test_uart_recv_none!!!
+    }
+
+
+    //if the ring buffer is empty we spin wait until it has some data.
     int pie = disable_interrupts();
-    for (; i < bufsz; i++) {
-        while (rbuf_empty(&uart->rxbuf))
-        {
-            condition_wait(&(uart->rxbnotempty));
-        }
-        dstbuf[i] = rbuf_getc(&uart->rxbuf);
-        uart->regs->ier |= IER_DRIE;                    // ready to read in another byte
-    }
+    while (rbuf_empty(&uart->rxbuf)) condition_wait(&uart->rxbnotempty);
     restore_interrupts(pie);
-    lock_release(&uart->lock);
-    return bufsz;
+    
+
+    //while the ring buffer isn't empty and until we've recieved bufsz Bytes, we recieve bytes from the ring buffer.
+    unsigned int numread = 0;
+    while (!rbuf_empty(&uart->rxbuf) && numread < bufsz){
+
+      ((char *)buf)[numread++] = rbuf_getc(&uart->rxbuf);
+
+      uart->regs->ier |= IER_DRIE;
+    }
+
+    lock_release(&uart->rq_lock);
+    return numread; //returns the number of bytes recieved from the ring buffer.
 }
 
 
-/* int uart_serial_send(struct serial *ser, const void *buf, unsigned int bufsz)
- * Inputs:
- *    struct serial *ser  - Pointer to the UART serial interface structure
- *    const void *buf     - Pointer to the buffer containing data to send
- *    unsigned int bufsz  - Number of bytes to write to the UART
- * Outputs: None
- * Return Value:
- *    >= 0      - Number of bytes successfully written to the transmit buffer
- *    -EINVAL   - The specified UART serial interface is not currently open
- * Function: Sends data from the provided buffer to the UART transmit ring buffer.
- *            Writes characters continuously until all bufsz bytes are copied. If
- *            the transmit buffer is full, condition_waits until transmit buffer is not full
- * Side Effects:
- *    - May suspend the calling thread if the transmit buffer is full
- *    - Modifies the transmit ring buffer and potentially the serial structure state.
- *    - Enables UART transmit interrupts by modifying IER register of UART
- */
+
 int uart_serial_send(struct serial * ser, const void * buf, unsigned int bufsz) {
-     struct uart_serial * const uart =
-        (void*)ser - offsetof(struct uart_serial, base);
-    lock_acquire(&uart->lock);
+    
+  struct uart_serial * uart = (void *)ser - offsetof(struct uart_serial, base);
+    lock_acquire(&uart->rq_lock);
+  if (!uart->opened) {
+    lock_release(&uart->rq_lock);
+    return -EINVAL;
+  }
 
-        if (!uart->opened) {
-            lock_release(&uart->lock);
-            return -EINVAL;
-        }
-        char* dstbuf = (char*) buf;
-        int i = 0;
-        for (; i < bufsz; i++) {
-            // MUST have a uart->regs->ier in the WHILE loop as software writing to buffer is MUCH faster than hardware reading from the buffer and transmitting
-            // For example, if we only assert above/right here, its possible that LSR_THRE is never set because the THR is still full from the previous byte, and we never get to write to the buffer
-            // Thus, we will be stuck in the WHILE loop forever, since we no longer check afterwards!
-            
-            // Critical Section: Interrupt could occur between while and condition_wait
-            int pie = disable_interrupts();
-            while (rbuf_full(&uart->txbuf)) {
-                condition_wait(&(uart->txbnotfull));
-            }
-            restore_interrupts(pie);
-            rbuf_putc(&uart->txbuf, dstbuf[i]);
-            uart->regs->ier |= IER_THREIE; // enable THRE interrupt
-        }
-        // enable THRE interrupt
-        // DO NOT disable THRE interrupt here, it is disabled in the ISR when the txbuf is empty
-    lock_release(&uart->lock);
-    return bufsz;
+  unsigned int nwritten = 0;
+
+  if (bufsz < 1) {
+    lock_release(&uart->rq_lock);
+    return nwritten; //we return 0 bytes sent if the bufsz is less than the blksz 
+  }
+
+  //until we have sent bufsz bytes to the ring buffer, we continue to send bytes to the ring buffer.
+  //if the ring buffer is ever empty, we spin wait until it has some data in it
+  while (nwritten < bufsz){
+
+    int pie = disable_interrupts();
+    while (rbuf_full(&uart->txbuf)) condition_wait(&uart->txbnotfull);
+    restore_interrupts(pie);
+
+
+    if (!rbuf_full(&uart->txbuf)) {
+      rbuf_putc(&uart->txbuf, ((char *) buf)[nwritten++]);
+    }
+
+      uart->regs->ier |= IER_THREIE;
+  }
+  lock_release(&uart->rq_lock);
+  return nwritten; //returns the number of bytes sent to the ring buffer
 }
-/* void uart_isr(int srcno, void *aux)
- * Inputs:
- *    int srcno  - Source number of the interrupt (IRQ) corresponding to the UART device
- *    void *aux  - Auxiliary data passed to the ISR, typically the UART serial structure
- * Outputs: None
- * Return Value: None
- * Function: Interrupt Service Routine (ISR) for the UART device. Handles hardware-triggered
- *            UART interrupts. The ISR checks the status registers and writes/reads into the corresponding
- *            RXBuf/TXBuf accordingly. Disables corresponding interrupts when there is no need to service them
- *            based upon certain conditions
- * Side Effects:
- *    - Modifies receive and transmit buffers
- *    - May enable or disable UART interrupts modifying UART registers
- *    - May wake threads waiting on condition variables
- */
+
 void uart_isr(int srcno, void * aux) {
-    struct uart_serial * uart = (struct uart_serial *)aux;
-
-    // NEED TO KNOW WHY THE INTERRUPT HAPPENED HENCE CHECK THE BITS
-    /*
-
-    Summer 2025 lecture says to use IIR (interrupt identifcactionr register...)
-
-    If Overrun need to READ the line status register! (at least thats what the spec says, so maybe use 110)
-
-    However it seems ECE391 FA25 (Current class) does not implement this
-
-
-
-    */
-
-    // Checks corresponding status bits to see if data needs to be placed into buffers
-    if (uart->regs->lsr & LSR_DR) { // if data ready
-        if (!rbuf_full(&uart->rxbuf)) {
-            rbuf_putc(&uart->rxbuf, uart->regs->rbr);   // read from RBR
-            condition_broadcast(&(uart->rxbnotempty));
-        } else {
-            uart->rxovrcnt++;
-        }
-    }
-    if (uart->regs->lsr & LSR_THRE) { // if THR empty
-        if (!rbuf_empty(&uart->txbuf)) {
-            char c = rbuf_getc(&uart->txbuf);
-            uart->regs->thr = c; // write to THR
-            condition_broadcast(&(uart->txbnotfull));       // wake up threads waiting on condition
-        }
+    
+    //type cast uart as a more convenient form of the aux.
+    struct uart_serial * uart = (struct uart_serial *) aux;
+   
+    //if we read the "data ready" status from the LSR, we service the interrupt by reading from the RBR into the recieve buffer
+    if (uart->regs->lsr & LSR_DR){
+      if (!rbuf_full(&uart->rxbuf)){
+        rbuf_putc(&uart->rxbuf, uart->regs->rbr); //write the rbr char to the recieve buffer if not full
+        condition_broadcast(&uart->rxbnotempty);
+      }
+      else {
+        //uart->rxovrcnt++;
+        uart->regs->ier &= ~IER_DRIE; //disable data ready interrupt if rxbuf is full
+      }
     }
 
 
-
-    // Disable THRE interrupt. Nothing to write THR to
-    if (rbuf_empty(&uart->txbuf)) {
-        uart->regs->ier &= ~IER_THREIE; // disable THRE interrupt
-    }
-    // Disable DR interrupt. No space in buffer to read from RBR
-    if (rbuf_full(&uart->rxbuf)) {
-        uart->regs->ier &= ~IER_DRIE; // disable DR interrupt
+    //if we read the "transmit holding empty" status from the LSR, we service the interrupt by writing to the THR with a character from the transmit buffer
+    if (uart->regs->lsr & LSR_THRE){
+      if (!rbuf_empty(&uart->txbuf)){
+        uart->regs->thr = rbuf_getc(&uart->txbuf); //write to the thr if the transmit buffer isn't empty.
+        condition_broadcast(&uart->txbnotfull);
+      }
+      else uart->regs->ier &= ~IER_THREIE; //disable transmit holding empty interrupt if txbuf is empty
     }
 }
 

@@ -34,6 +34,7 @@ extern void alarm_init(struct alarm * al, const char * name);
 // alarm event, either init, wake-up, or reset.
 
 extern void alarm_sleep(struct alarm * al, unsigned long long tcnt);
+extern void alarm_preempt(void);
 
 // Resets the alarm so that the next sleep increment is relative to the time
 // of this function call.

@@ -91,7 +91,10 @@ void disable_intr_source(int srcno) {
 
 void handle_smode_interrupt(unsigned int cause) { handle_interrupt(cause); }
 
-void handle_umode_interrupt(unsigned int cause) { handle_interrupt(cause); }
+void handle_umode_interrupt(unsigned int cause) { 
+    handle_interrupt(cause); 
+    running_thread_yield();
+}
 
 // INTERNAL FUNCTION DEFINITIONS
 //
