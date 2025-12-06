@@ -90,7 +90,7 @@ void handle_syscall(struct trap_frame *tfr) {
  */
 
 int64_t syscall(const struct trap_frame *tfr) {
-    alarm_preempt();
+    // alarm_preempt();
     switch (tfr->a7) {
         case SYSCALL_EXIT:
             return sysexit();
@@ -134,6 +134,7 @@ int64_t syscall(const struct trap_frame *tfr) {
 
 int sysexit(void) { 
     process_exit();
+    alarm_preempt();
     return 0; 
 }
 
@@ -216,10 +217,11 @@ int syswait(int tid) {
     // based off of DKW SU25 lecture posted on Piazza
     // LXDL
 
-    if (0 <= tid)
-        return thread_join(tid);    // thread join will hold the proeprr retun value
-    else
-        return -EINVAL;
+    if (0 <= tid){
+        int retval =  thread_join(tid);    // thread join will hold the proeprr retun value
+        alarm_preempt();
+        return retval;
+    }else return -EINVAL;
 
 
     return 0;
@@ -237,8 +239,10 @@ int sysprint(const char *msg) {
     // check if string is valid vmem address
     // print
     int valid = validate_vstr(msg, PTE_U | PTE_R);
+
+    alarm_preempt();
     if (valid != 0) return valid; // return invalid reason
-   
+    
     //print
     // kprintf(msg);
     kprintf("Thread <%s:%d> says: %s\n",
@@ -263,6 +267,7 @@ int sysusleep(unsigned long us) {
     struct alarm alarm;
     alarm_init(&alarm, "sleep");
     alarm_sleep_us(&alarm, us);
+    alarm_preempt();
     return 0;
 }
 
@@ -303,6 +308,7 @@ int sysfscreate(const char *path) {
 
     valid = create_file(mpnameptr, flnameptr);
 
+    alarm_preempt();
     // kfree(mpnameptr);
     // kfree(flnameptr);
 
@@ -348,7 +354,7 @@ int sysfsdelete(const char *path) {
 
     // kfree(mpnameptr);
     // kfree(flnameptr);
-
+    alarm_preempt();
     return valid;
 }
 
@@ -422,6 +428,8 @@ int sysopen(int fd, const char *path) {
     // kfree(flnameptr);
     
     running->uiotab[fd] = file;
+
+    alarm_preempt();
     return fd;
 }
 
@@ -444,6 +452,8 @@ int sysclose(int fd) {
     uio_close(running->uiotab[fd]);
 
     running->uiotab[fd] = NULL;
+
+    alarm_preempt();
     return 0;
 
 }
@@ -492,6 +502,7 @@ long sysread(int fd, void *buf, size_t bufsz) {
     memcpy(buf, kbuf, val);
     kfree(kbuf);
 
+    alarm_preempt();
     return val;
 }
 
@@ -531,6 +542,8 @@ long syswrite(int fd, const void *buf, size_t len) {
 
     int val = uio_write(running->uiotab[fd], kbuf, len);
     kfree(kbuf);
+
+    alarm_preempt();
     return val;
 }
 
@@ -556,6 +569,7 @@ int sysfcntl(int fd, int cmd, void *arg) {
 
     return uio_cntl(running->uiotab[fd], cmd, arg);
 
+    alarm_preempt();
     return 0;
 }
 
@@ -571,6 +585,8 @@ int sysfcntl(int fd, int cmd, void *arg) {
  */
 int syspipe(int *wfdptr, int *rfdptr) {
     // cp3
+    
+    alarm_preempt();
     return 0;
 }
 
@@ -604,5 +620,7 @@ int sysuiodup(int oldfd, int newfd) {
     if (running->uiotab[oldfd] == NULL || running->uiotab[newfd] != NULL) return -EBADFD;
     running->uiotab[newfd] = running->uiotab[oldfd];
     uio_addref(running->uiotab[newfd]);   // dont forget to increment refcnt
+
+    alarm_preempt();
     return newfd;
 }
