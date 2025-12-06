@@ -264,6 +264,15 @@ void process_exit(void) {
         }
     }
 
+
+    // remove proctab from proclist
+    for (int i = 0; i < NPROC; i++) {
+        if (proctab[i] == proc) {
+            proctab[i] = NULL;
+            break;
+        }
+    }
+
     discard_active_mspace();
 
     thread_set_process(proc->tid, NULL);

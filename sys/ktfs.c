@@ -1284,7 +1284,7 @@ void ktfs_flush(struct filesystem* fs) {
  * @return None
  */
 void ktfs_listing_close(struct uio* uio) {
-    struct ktfs_listing_uio *const ls = (struct fs_listing_uio *)uio;
+    struct ktfs_listing_uio *const ls = (struct ktfs_listing_uio *)uio;
     kfree(ls);
     //TODO: This implementation is actually quite odd (ripped off of devfs but I have the same questions regardless). who calls uio_close?????
     return;
