@@ -6,7 +6,7 @@
 #define BUFSIZE 1024
 #define MAXARGS 8
 
-#include "shell_utils.c"
+// #include "shell_utils.c"
 
 // helper function for parser
 char* find_terminator(char* buf) {
@@ -155,8 +155,8 @@ void main(void)
 		// printf("%d", argc);
 		
 		// print out all the buf, argv, readinf, and readoutf in console
-		print_parsed_command(buf, argv, readinf, readoutf, argc);		
-		continue;
+		// print_parsed_command(buf, argv, readinf, readoutf, argc);		
+		// continue;
 		
 		if (argc == 0) continue;
 		if (argc > ARG_MAX) continue;
