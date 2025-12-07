@@ -146,8 +146,7 @@ void main(void)
 		printf("LUMON OS> ");
 		getsn(buf, BUFSIZE - 1);
 
-		if (0 == strcmp(buf, "exit"))
-		_exit();
+		if (0 == strcmp(buf, "exit")) _exit();
 
 		// FIXME
 		// Call your parse function and exec the user input
@@ -183,7 +182,7 @@ void main(void)
 		if (strchr(argv[0], '/') == NULL)  // dosent contain a path proper, see docs for why we use this cond
 			snprintf(name, 100, "c/%s", argv[0]);
 		else
-			snprintf(name, 100, "c/%s", argv[0]);
+			snprintf(name, 100, "%s", argv[0]);
 		
 		int rett = _open(-1, name);
 		if (rett < 0)

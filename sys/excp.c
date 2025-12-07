@@ -14,6 +14,7 @@
 #include "riscv.h"
 #include "string.h"
 #include "thread.h"
+#include "timer.h"
 #include "trap.h"
 #include "process.h"
 
@@ -124,7 +125,10 @@ void handle_umode_exception(unsigned int cause, struct trap_frame* tfr) {
                 // fall through into the other page faulr
             case RISCV_SCAUSE_STORE_PAGE_FAULT:
                 // if the page fault is not handled we can fall through to fail
-                if (handle_umode_page_fault(tfr, csrr_stval())) return;
+                if (handle_umode_page_fault(tfr, csrr_stval())) {
+                    alarm_preempt();
+                    return;
+                }
             // NOTE: THESE ALL FALL THROUGH
             case RISCV_SCAUSE_INSTR_PAGE_FAULT:
                 // if (handle_umode_page_fault(tfr, csrr_stval())) return;
@@ -148,6 +152,7 @@ void handle_umode_exception(unsigned int cause, struct trap_frame* tfr) {
     
     // switch back to thread before exiting, this probablu does not work
     // asm volatile("mv tp, %0" : : "r"(tfr->tp));
+    alarm_preempt();
     process_exit();
     return;
 }
