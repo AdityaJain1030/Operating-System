@@ -11,6 +11,7 @@
 */
 
 #include "memory.h"
+#include "timer.h"
 #ifdef THREAD_TRACE
 #define TRACE
 #endif
@@ -675,6 +676,7 @@ void running_thread_suspend(void) {
     */
     enable_interrupts();                                    // Documentation requires that we must enable interrupts before calling _thread_swtch
     next->state = THREAD_SELF;
+    alarm_preempt();
     if (next->proc != NULL) switch_mspace(next->proc->mtag);    // switch to next process memspace if needed
     struct thread* old = _thread_swtch(next);
     if (old->state == THREAD_EXITED)

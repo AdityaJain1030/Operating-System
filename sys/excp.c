@@ -152,6 +152,7 @@ void handle_umode_exception(unsigned int cause, struct trap_frame* tfr) {
     
     // switch back to thread before exiting, this probablu does not work
     // asm volatile("mv tp, %0" : : "r"(tfr->tp));
+    alarm_preempt();
     process_exit();
     return;
 }
