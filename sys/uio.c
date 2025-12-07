@@ -35,7 +35,7 @@ static long nulluio_write(struct uio* uio, const void* buf, unsigned long buflen
 
 
 // more pipe stuff
-
+// use UIO interface! Underlying UIO object is the PIPE BUFFER!
 // Pipe stuff
 struct pipe_buffer {
     char* buf;                          // buffer pointer, spec says should be page size
@@ -130,6 +130,8 @@ void pipe_write_uio_close(struct uio* uio) {
         }
     }
     lock_release(&pipebuf->lock);
+
+    // if not free and writers_open == 0, we rely on reader to CLOSE!
     if (free) 
     {
         free_phys_page((unsigned long)pipebuf->buf);   // free the physical page
@@ -235,7 +237,22 @@ void pipe_read_uio_close(struct uio* uio)
     struct pipe_buffer* pipebuf = (struct pipe_buffer*)((char*)uio - offsetof(struct pipe_buffer, readuio));
 
 
+    int free = 0;       // suggestion from ART, keeps code cleaner
 
+    lock_acquire(&pipebuf->lock);
+
+    pipebuf->readers_open--;
+    if (pipebuf->readers_open == 0)
+    {
+        // Wake up any writers waiting for space
+        // edge case, since, we need to wake them up as otherwise sicne we have 0 readers we have no way to wake up the writer
+        // we could end up hangign so be careful!
+        // Make sure we either eventually CLOSE writer then or something else! As writes indefnitly
+        if (pipebuf->writers_open == 0)
+        {
+            free = 1;
+        }
+    }
 }
 
 /*
@@ -249,19 +266,15 @@ If UIO is null we return -EINVAL
 long pipe_read_uio_read(struct uio* uio, void* buf, unsigned long bufsz)
 {
     // check if uio is null
-    if (uio == NULL) return -EINVAL;
+    if (uio == NULL || buf == NULL) return -EINVAL;
     
     struct pipe_buffer* pipebuf = (struct pipe_buffer*)((char*)uio - offsetof(struct pipe_buffer, readuio));
 
+
+    // i think by definiton we return EOF if the pipe is empty and no writers are open
     if (pipebuf->writers_open == 0 && pipeempty(pipebuf)) 
     {
         return 0; // No writers and buffer empty, EOF
-    }
-
-    // if no writers are open we just read till end of buffer
-    if (pipebuf->writers_open == 0 && pipeempty(pipebuf)) 
-    {
-        return 0; // No writers and buffer empty, EOF idk man
     }
 
     unsigned long bytes_read = 0;
@@ -279,7 +292,7 @@ long pipe_read_uio_read(struct uio* uio, void* buf, unsigned long bufsz)
             {
                 // not sure if we APPEND EOF here
                 lock_release(&pipebuf->lock);
-                return bytes_read; // No writers, return what we have read so far (could be 0)
+                return bytes_read; // No writers, return what we have read so far (could be 0), or do we return EOF?? im not too sure tbh
             }
             condition_wait(&pipebuf->not_empty);
         }
