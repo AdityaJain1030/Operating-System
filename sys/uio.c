@@ -165,11 +165,11 @@ We write byte by byte (I know slow), however we can chunk this if you need to. J
 */
 long pipe_write_uio_write(struct uio* uio, const void *buf, unsigned long buflen) {
     
-    if (uio == NULL) return -EINVAL;
-    
+    if (uio == NULL || buf == NULL) return -EINVAL;
+    if (buflen == 0) return 0; // nothing to write
     struct pipe_buffer* pipebuf = (struct pipe_buffer*)((char*)uio - offsetof(struct pipe_buffer, writeuio));
     
-
+    // NO NEED TO CHECK IDK WHY
 
     if (pipebuf->readers_open == 0) 
     {
@@ -177,10 +177,6 @@ long pipe_write_uio_write(struct uio* uio, const void *buf, unsigned long buflen
     }
     
     // wait while buffer is NOT full
-    while (pipefull(pipebuf))
-    {
-        condition_wait(&pipebuf->not_full);
-    }
     while (pipefull(pipebuf)) 
     {
         // Wait until there is space in the buffer
@@ -193,49 +189,30 @@ long pipe_write_uio_write(struct uio* uio, const void *buf, unsigned long buflen
         
         
         */
+        condition_wait(&pipebuf->not_full);
         if (pipebuf->readers_open == 0) 
         {
             return -EPIPE; // No readers, cannot write
         }
-        condition_wait(&pipebuf->not_full);
     }
 
 
-    // another check, see above
-    if (pipebuf->readers_open == 0) 
-    {
-        return -EPIPE; // No readers, cannot write
-    }
 
 
     // pipe buffer is our source buffer, we direclty use uio->open to reference
-    unsigned long bytes_written = 0;
+
+    // we write as much as possible when there is at least one
 
     lock_acquire(&pipebuf->lock);
 
     char* srcbuf = (char*) buf;
-    // WE ASSUME THAT USER CAN ONLY SEND IN BYTES LESS THAN 4096! OTHERWISE WE WILL BE BROKEN
-    while (bytes_written < buflen) 
-    {
-        // Wait until there is space in the buffer
-        while (pipefull(pipebuf)) 
-        {
-            if (pipebuf->readers_open == 0) 
-            {
-                lock_release(&pipebuf->lock);           // reader closed premautrley, return error?
-                return -EPIPE; // No readers, stop writing, broken pipe. Should not premautrely close???
-            }
-            condition_wait(&pipebuf->not_full);
-        }
 
-        // Write a byte to the buffer
-        pipebuf->buf[pipebuf->tail] = srcbuf[bytes_written];
-        pipebuf->tail = (pipebuf->tail + 1) % pipebuf->bufsz;
-        bytes_written++;
+    unsigned long bytes_written = min(pipebuf->bufsz - pipebuf->length, buflen);
 
-        // Signal that the buffer is not empty
-        condition_signal(&pipebuf->not_empty);
-    }
+    memcpy(&pipebuf->buf[pipebuf->tail], srcbuf, bytes_written);
+    pipebuf->tail = (pipebuf->tail + bytes_written) % pipebuf->bufsz;
+    pipebuf->length += bytes_written;
+    condition_signal(&pipebuf->not_empty);
     lock_release(&pipebuf->lock);
     return bytes_written;
 }
