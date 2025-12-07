@@ -6,7 +6,7 @@
 
 void main (int argc, char *argv[]){
 
-    char buf[LS_BUFSZ+1];
+    char buf[LS_BUFSZ+1]; 
     if (argc == 1)
     {
         int fd = _open(-1, "");
@@ -30,12 +30,14 @@ void main (int argc, char *argv[]){
         if (fd < 0) continue;
 
         int is_ktfs = 0;
-        if (strcmp(argv[i], "c") == 0) is_ktfs = 1;
+        if (strcmp(argv[i], "c") == 0 || strcmp(argv[i], "c/")==0) is_ktfs = 1;
 
         while (1){
             int br = _read(fd, buf, LS_BUFSZ);
             if (br <= 0) break;
-            buf[br] = '\0'; // null terminate end of string
+
+            if (!is_ktfs) buf[br] = '\0'; // null terminate end of string
+            else buf[br-1] = '\0';
             printf("%s\n", buf);
 
             // we have hella newlines idt we need this
