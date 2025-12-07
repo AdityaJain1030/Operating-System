@@ -78,7 +78,7 @@ static const struct uio_intf pipe_read_uio_intf = {
 //
 // Internal Pipe Functions
 // Referenced KTFS style like docs
-
+// we assume that pipebuf is a VALID pointer otherwise it is cooked
 int pipefull (struct pipe_buffer* pipebuf)
 {
     return pipebuf->length == pipebuf->bufsz;
@@ -103,6 +103,10 @@ WHen we close we check if the reader is closed if it is then we can free the und
 
 */
 void pipe_write_uio_close(struct uio* uio) {
+    
+    if (uio == NULL) return -EINVAL;
+
+
     struct pipe_buffer* pipebuf = (struct pipe_buffer*)((char*)uio - offsetof(struct pipe_buffer, writeuio));
 
 
@@ -147,6 +151,9 @@ We write byte by byte (I know slow), however we can chunk this if you need to. J
 
 */
 long pipe_write_uio_write(struct uio* uio, const void *buf, unsigned long buflen) {
+    
+    if (uio == NULL) return -EINVAL;
+    
     struct pipe_buffer* pipebuf = (struct pipe_buffer*)((char*)uio - offsetof(struct pipe_buffer, writeuio));
     
     if (pipebuf->readers_open == 0) 
@@ -213,21 +220,37 @@ long pipe_write_uio_write(struct uio* uio, const void *buf, unsigned long buflen
     return bytes_written;
 }
 
+/*
 
+
+This may be buggy so idk.
+
+Basically edge case of prematurely closing
+
+*/
 
 void pipe_read_uio_close(struct uio* uio) 
 {
+    if (uio == NULL) return -EINVAL;
     struct pipe_buffer* pipebuf = (struct pipe_buffer*)((char*)uio - offsetof(struct pipe_buffer, readuio));
 
 
 
 }
 
+/*
 
+
+If UIO is null we return -EINVAL
+
+*/
 
 
 long pipe_read_uio_read(struct uio* uio, void* buf, unsigned long bufsz)
 {
+    // check if uio is null
+    if (uio == NULL) return -EINVAL;
+    
     struct pipe_buffer* pipebuf = (struct pipe_buffer*)((char*)uio - offsetof(struct pipe_buffer, readuio));
 
     if (pipebuf->writers_open == 0 && pipeempty(pipebuf)) 
