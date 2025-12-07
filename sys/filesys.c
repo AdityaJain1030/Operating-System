@@ -328,7 +328,7 @@ int parse_path(char* path, char** mpnameptr, char** flnameptr) {
         // systems job
 
         *mpnameptr = path; // this is a bit cooked
-        flnameptr = NULL;
+        *flnameptr = NULL;
         // ok that was giving me a warning lets just strcpy
         // *mpnameptr = kmalloc(path_len);
         // strncpy(*mpnameptr, path, path_len);
