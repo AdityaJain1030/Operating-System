@@ -130,17 +130,14 @@ void pipe_write_uio_close(struct uio* uio) {
         // this is an edge case, we need to wake them up as otherwise sicne we have 0 writers we have no way to wake up the reader
         // for example say we write "Hello". And then reader reads but then pip_write_uio_close is called. No way to "wake up" reader to return EOF
         // make sure to append EOF?, no we dont need to, EOF is returned by function to signal  a condiiton!
-        if (pipebuf->readers_open > 0 && !pipeempty(pipebuf)) 
+        condition_broadcast(&pipebuf->not_empty);    // for any that are waiting to read, just broadcast the condition, and then in the reader it will check if empty or not and how many writers left.... 
+        if (pipebuf->readers_open == 0) 
         {
-            condition_broadcast(&pipebuf->not_empty);
-        }
-        else    // no readers open, we can free the struct
-        {
-            free = 1;                                    // free the pipe buffer struct, need the free variable so we dont free before we release the lock
+            free = 1;
         }
     }
     lock_release(&pipebuf->lock);
-
+    // need to do this after because relalsign lock
     // if not free and writers_open == 0, we rely on reader to CLOSE!
     if (free) 
     {
@@ -185,7 +182,9 @@ long pipe_write_uio_write(struct uio* uio, const void *buf, unsigned long buflen
             When pipebuf is full, we condaiotn wait on the reader, btu then the reader closes withotu readinf then we need to handlel that
 
             when reader partially reads some, but then closes and we try to write after we exit then we should reutn bad as well
-        
+
+
+            So say we are waitign to not be full but readers are all clsoed, then we return -EPIPE
         
         */
         condition_wait(&pipebuf->not_full);
@@ -242,10 +241,19 @@ void pipe_read_uio_close(struct uio* uio)
         // edge case, since, we need to wake them up as otherwise sicne we have 0 readers we have no way to wake up the writer
         // we could end up hangign so be careful!
         // Make sure we either eventually CLOSE writer then or something else! As writes indefnitly
+        // signal all writers
+        condition_broadcast(&pipebuf->not_full);    // for any that are waiting to write
         if (pipebuf->writers_open == 0)
         {
             free = 1;
         }
+    }
+    lock_release(&pipebuf->lock);
+
+    if (free)
+    {
+        free_phys_page((unsigned long)pipebuf->buf);   // free the physical page
+        kfree(pipebuf);                                    // free the pipe buffer struct
     }
 }
 
