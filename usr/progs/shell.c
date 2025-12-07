@@ -146,8 +146,7 @@ void main(void)
 		printf("LUMON OS> ");
 		getsn(buf, BUFSIZE - 1);
 
-		if (0 == strcmp(buf, "exit"))
-		_exit();
+		if (0 == strcmp(buf, "exit")) _exit();
 
 		// FIXME
 		// Call your parse function and exec the user input
