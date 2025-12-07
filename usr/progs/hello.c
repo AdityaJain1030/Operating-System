@@ -1,3 +1,4 @@
+#include "shell.h"
 #ifndef UMODE // cp1
     #include "uio.h"
     //#include "../../sys/console.h"
@@ -28,6 +29,6 @@
 #ifdef UMODE // cp2&3
     #include "string.h"
     void main(void) {
-        printf("Hello, world!\n");
+        dprintf(STDOUT, "Hello, world!\n");
     }
 #endif
