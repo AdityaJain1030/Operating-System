@@ -656,7 +656,7 @@ int ktfs_open(struct filesystem* fs, const char* name, struct uio** uioptr) { //
     if (!ktfs) return -EINVAL; //either the file mount hasn't happened or its in the process of happening
     
     //NOTE: CP3 ADDITION: LISTING!!!!!!!!!
-    if (strncmp(name, " ", strlen(name)) == 0){
+    if (!strncmp(name, "" , strlen(name)) || !strncmp(name, "/", strlen(name))){
         struct ktfs_listing_uio * ls;
         ls = kcalloc(1, sizeof(*ls));
         ls->records = records;
@@ -1305,14 +1305,23 @@ long ktfs_listing_read(struct uio* uio, void* buf, unsigned long bufsz) {
 
     int nfiles = ktfs->max_inode_count;
 
-    int ncpy = 0;//number of bytes copied
-    for (int i = 0; i < nfiles; i++){ 
-        char * name = ls->records->filetab[i]->dentry.name;
-        if (ncpy+strlen(name)+1 >= bufsz) break; //TODO: make sure this is right.... I mean the only difference I see in impl is whether i output them as seperate stirngs or one big string of FILE_NAME_MAX_LEN size
-        memcpy((char *)buf+ncpy, name, strlen(name));
-        memset((char *)buf+(ncpy+strlen(name)+1), 0, 1);//note: accounted for the null-terminator here
-        ncpy += strlen(name)+1;
+    // int ncpy = 0;//number of bytes copied
+    // for (int i = 0; i < nfiles; i++){ 
+    //     if (!ls->records->filetab[i]) continue;
+    //     char * name = ls->records->filetab[i]->dentry.name;
+    //     if (ncpy+strlen(name)+1 >= bufsz) break; //TODO: make sure this is right.... I mean the only difference I see in impl is whether i output them as seperate stirngs or one big string of FILE_NAME_MAX_LEN size
+    //     memcpy((char *)buf+ncpy, name, strlen(name));
+    //     memset((char *)buf+(ncpy+strlen(name)+1), 0, 1);//note: accounted for the null-terminator here
+    //     ncpy += strlen(name)+1;
+    // }
     
+
+    //new clean implementation
+    int ncpy = 0;
+    for (int i = 0; i < nfiles; i++){
+        if (!ls->records->filetab[i]) continue;
+        if (bufsz-ncpy <= 0) return ncpy;
+        ncpy += snprintf((char *)buf+ncpy, bufsz-ncpy, "%s%s", ls->records->filetab[i], "\n");
     }
 
     return ncpy;
