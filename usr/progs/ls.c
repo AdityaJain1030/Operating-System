@@ -1,5 +1,6 @@
 #include "syscall.h"
 #include "string.h"
+#include "shell.h"
 
 #define LS_BUFSZ 1024
 
@@ -15,11 +16,13 @@ void main (int argc, char *argv[]){
         if (strcmp(argv[i], "c") == 0) is_ktfs = 1;
 
         while (1){
-            int br = _read(fd, buf, LS_BUFSZ);
+            int br = _read(fd, buf, LS_BUFSZ - 1);
+
+            buf[br+1] = '\0';
 
             if (br == 0) break;
 
-            dprintf(STDOUT, "%d", buf);
+            dprintf(STDOUT, "%s", buf);
 
             if (is_ktfs) dputs(STDOUT, "\r\n"); //because the other listings don't have it built in like ktfs
         }
@@ -59,8 +62,8 @@ void main (int argc, char *argv[]){
     //     }
     //
     //     dprintf(STDOUT,"\r"); 
-    }
+//     }
 
     
 
-}
+// }

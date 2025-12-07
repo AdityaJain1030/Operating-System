@@ -1321,7 +1321,11 @@ long ktfs_listing_read(struct uio* uio, void* buf, unsigned long bufsz) {
     //new clean implementation
     int ncpy = 0;
     while (ls->read_idx < nfiles){ 
-        if (!ls->records->filetab[ls->read_idx]) continue;
+        if (!ls->records->filetab[ls->read_idx])
+        {
+            ls->read_idx++;
+            continue;
+        }
         if (bufsz-ncpy <= 0) {
             return ncpy;
         }
