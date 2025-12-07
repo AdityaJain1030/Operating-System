@@ -35,7 +35,7 @@ void count(int fd, char* name)
             if (space(c)) words++;
         }
     }
-    printf("%d\t%d\t%d\t%s\r", lines, words, bytes, name);
+    dprintf(STDOUT, "%d\t%d\t%d\t%s\r", lines, words, bytes, name);
 }
 
 void main(int argc, char *argv[]) {

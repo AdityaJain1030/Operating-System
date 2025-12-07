@@ -650,14 +650,14 @@ int ktfs_open(struct filesystem* fs, const char* name, struct uio** uioptr) { //
     void * blkptr;
 
     //preliminary guardcase check //
-    if (!fs || !name) return -EINVAL; //the uioptr can be null right?
+    if (!fs) return -EINVAL; // NEW CP3 CHANGE: we allow null name now
 
     if (strlen(name) > KTFS_MAX_FILENAME_LEN) return -EINVAL; //strlen doesn't count the null terminator so this guardcase is right. the strlen(name) should not exceed the maxlen
 
     if (!ktfs) return -EINVAL; //either the file mount hasn't happened or its in the process of happening
     
     //NOTE: CP3 ADDITION: LISTING!!!!!!!!!
-    if (!strncmp(name, "" , strlen(name)) || !strncmp(name, "/", strlen(name))){
+    if (name == NULL || *name == '\0'){
         struct ktfs_listing_uio * ls;
         ls = kcalloc(1, sizeof(*ls));
         ls->read_idx = 0;
@@ -1304,7 +1304,7 @@ long ktfs_listing_read(struct uio* uio, void* buf, unsigned long bufsz) {
     struct ktfs_listing_uio *const ls = (struct ktfs_listing_uio *)uio;
 
     if (ls->records == NULL) return -EINVAL;
-
+    //kprintf("listing enter\n");
     int nfiles = ktfs->max_inode_count;
 
     // int ncpy = 0;//number of bytes copied
@@ -1326,10 +1326,28 @@ long ktfs_listing_read(struct uio* uio, void* buf, unsigned long bufsz) {
             ls->read_idx++;
             continue;
         }
+        //kprintf("bufsz: %d\n", bufsz);
+        //kprintf("ncpy: %d\n", ncpy);
+
         if (bufsz-ncpy <= 0) {
+            //kprintf("return???\n");
             return ncpy;
         }
-        ncpy += snprintf((char *)buf+ncpy, bufsz-ncpy, "%s\r\n", ls->records->filetab[ls->read_idx]);
+        int nread = snprintf((char *)buf+ncpy, bufsz-ncpy, "%s", ls->records->filetab[ls->read_idx]->dentry.name);
+        // kprintf("name: %s\n", ((char *)buf+ncpy));
+        // kprintf("nread: %d\n", nread);
+        // kprintf("strlen of name: %d", strlen(ls->records->filetab[ls->read_idx]->dentry.name));
+        //kprintf("buffer: %s\n", buf);
+
+        if (nread != strlen(ls->records->filetab[ls->read_idx]->dentry.name)+1) {
+            //kprintf("returned\n");
+            return ncpy;
+        }
+
+        //kprintf("ls->read_idx = %d\n", ls->read_idx);
+        if (ls->read_idx < nfiles) ((char *)buf)[ncpy+nread-1] = '\r'; //I lowk want the last char to be a cariage return
+        
+        ncpy += nread;
         ls->read_idx++;
     }
     

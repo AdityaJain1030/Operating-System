@@ -7,6 +7,6 @@ void main(int argc, char *argv[]) {
         _write(STDOUT, argv[i], strlen(argv[i]));
         if (i < argc - 1) _write(STDOUT, " ", 1);
     }
-    _write(STDOUT, "\n\r\n", 1);
+    _write(STDOUT, "\r\n", 2);
     _exit();
 }

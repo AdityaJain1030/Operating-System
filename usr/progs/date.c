@@ -49,7 +49,7 @@ void date(uint64_t t) {
     // Print the date to STDOUT
     
     //format 05 Dec 2025 18:00:00 -> (has a constant 20 characters not including the null terminator)
-    printf("%d%d %s %d %d%d:%d%d:%d%d\r",
+    dprintf(STDOUT, "%d%d %s %d %d%d:%d%d:%d%d\r",
             day/10, day%10,
             month_names[month],
             year,
