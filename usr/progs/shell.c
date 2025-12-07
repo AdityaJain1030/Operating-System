@@ -28,7 +28,7 @@ char* find_terminator(char* buf) {
 }
 
 // add redirect in and redirect out files
-int parse(char* buf, char** argv, char **readinf, char** readoutf) {
+int parse(char* buf, char** argv, char **readinf, char** readoutf, char** cont) {
 	// FIXME
 	// feel free to change this function however you see fit
 
@@ -36,6 +36,11 @@ int parse(char* buf, char** argv, char **readinf, char** readoutf) {
 	char temp;
 	char *head, *end;
 	head = buf;
+
+	// ok so to avoid upheaving a lot of parse infra we can cheat the system to handle pipes as indepdendent commands
+	// we then just run parse individually on each command
+	// cont will be the starting point of the next command (NULL if there is none)
+	*cont = NULL;
 
 	for(;;) { // find each argv
 		while(*head == ' ') head++;
@@ -107,7 +112,7 @@ int parse(char* buf, char** argv, char **readinf, char** readoutf) {
 
 				case PIPE:
 					// FIXME
-					head++; // we didnt do this yet
+					*cont = head;
 					break;
 
 				default:
@@ -140,6 +145,7 @@ void main(void)
 
 	for (;;)
 	{
+		char* cont;
 		readinf = NULL;
 		readoutf = NULL; // reset every command 
 		memset(buf, 0, BUFSIZE);
@@ -150,7 +156,7 @@ void main(void)
 
 		// FIXME
 		// Call your parse function and exec the user input
-		argc = parse(buf, argv, &readinf,  &readoutf);
+		argc = parse(buf, argv, &readinf,  &readoutf, &cont);
 		// printf("%d", argc);
 		
 		// print out all the buf, argv, readinf, and readoutf in console

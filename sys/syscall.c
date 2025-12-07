@@ -594,7 +594,10 @@ int syspipe(int *wfdptr, int *rfdptr) {
     // 
     // 
 
-    if (wfdptr == NULL || rfdptr == NULL) return -EINVAL;
+    // if (wfdptr == NULL || rfdptr == NULL) return -EINVAL;
+    if (validate_vptr(wfdptr, sizeof(unsigned long long), PTE_U | PTE_W | PTE_R) != 0) return -EINVAL; // im not sure abt our logic
+    if (validate_vptr(rfdptr, sizeof(unsigned long long), PTE_U | PTE_W | PTE_R) != 0) return -EINVAL;
+
     struct process *running = current_process();
     
     

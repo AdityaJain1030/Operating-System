@@ -115,7 +115,7 @@ WHen we close we check if the reader is closed if it is then we can free the und
 */
 void pipe_write_uio_close(struct uio* uio) {
     
-    if (uio == NULL) return -EINVAL;
+    if (uio == NULL) return;
 
 
     struct pipe_buffer* pipebuf = (struct pipe_buffer*)((char*)uio - offsetof(struct pipe_buffer, writeuio));
@@ -141,7 +141,7 @@ void pipe_write_uio_close(struct uio* uio) {
     // if not free and writers_open == 0, we rely on reader to CLOSE!
     if (free) 
     {
-        free_phys_page((unsigned long)pipebuf->buf);   // free the physical page
+        free_phys_page((void *)pipebuf->buf);   // free the physical page
         kfree(pipebuf);                                    // free the pipe buffer struct
     }
 }
@@ -160,9 +160,10 @@ We write byte by byte (I know slow), however we can chunk this if you need to. J
 
 */
 long pipe_write_uio_write(struct uio* uio, const void *buf, unsigned long buflen) {
-    
-    if (uio == NULL || buf == NULL) return -EINVAL;
+    if (uio == NULL) return -EINVAL;
+    // zero checks should always happen first before buf checks
     if (buflen == 0) return 0; // nothing to write
+    if (buf == NULL) return -EINVAL;
     struct pipe_buffer* pipebuf = (struct pipe_buffer*)((char*)uio - offsetof(struct pipe_buffer, writeuio));
     
     // NO NEED FOR LOCKS. Since it is okay if state is changed in this case, we acutally WANT THAT
@@ -205,12 +206,12 @@ long pipe_write_uio_write(struct uio* uio, const void *buf, unsigned long buflen
 
     char* srcbuf = (char*) buf;
 
-    unsigned long bytes_written = min(pipebuf->bufsz - pipebuf->length, buflen);
+    unsigned long bytes_written = MIN(pipebuf->bufsz - pipebuf->length, buflen);
 
     memcpy(&pipebuf->buf[pipebuf->tail], srcbuf, bytes_written);
     pipebuf->tail = (pipebuf->tail + bytes_written) % pipebuf->bufsz;
     pipebuf->length += bytes_written;
-    condition_signal(&pipebuf->not_empty);
+    condition_broadcast(&pipebuf->not_empty);
     lock_release(&pipebuf->lock);
     return bytes_written;
 }
@@ -226,7 +227,7 @@ Basically edge case of prematurely closing
 
 void pipe_read_uio_close(struct uio* uio) 
 {
-    if (uio == NULL) return -EINVAL;
+    if (uio == NULL) return;
     struct pipe_buffer* pipebuf = (struct pipe_buffer*)((char*)uio - offsetof(struct pipe_buffer, readuio));
 
 
@@ -252,7 +253,7 @@ void pipe_read_uio_close(struct uio* uio)
 
     if (free)
     {
-        free_phys_page((unsigned long)pipebuf->buf);   // free the physical page
+        free_phys_page((void *)pipebuf->buf);   // free the physical page
         kfree(pipebuf);                                    // free the pipe buffer struct
     }
 }
@@ -295,12 +296,12 @@ long pipe_read_uio_read(struct uio* uio, void* buf, unsigned long bufsz)
 
 
     lock_acquire(&pipebuf->lock);
-    unsigned long bytes_read = min(bufsz, pipebuf->length);
+    unsigned long bytes_read = MIN(bufsz, pipebuf->length);
     char* dstbuf = (char*) buf;
     memcpy(dstbuf, &pipebuf->buf[pipebuf->head], bytes_read);
     pipebuf->head = (pipebuf->head + bytes_read) % pipebuf->bufsz;
     pipebuf->length -= bytes_read;
-    condition_signal(&pipebuf->not_full);
+    condition_broadcast(&pipebuf->not_full);
     lock_release(&pipebuf->lock);
     return bytes_read;
 }
@@ -390,8 +391,8 @@ void create_pipe(struct uio **wptr, struct uio **rptr) {
     condition_init(&pipebuf->not_empty, "pipe_not_empty");
     condition_init(&pipebuf->not_full, "pipe_not_full");
 
-    uio_init1(&pipebuf->writeuio, &pipe_write_uio_intf);
-    uio_init1(&pipebuf->readuio, &pipe_read_uio_intf);
+    uio_init1(pipebuf->writeuio, &pipe_write_uio_intf);
+    uio_init1(pipebuf->readuio, &pipe_read_uio_intf);
     
 }
 
