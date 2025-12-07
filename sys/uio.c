@@ -32,7 +32,18 @@ static long nulluio_write(struct uio* uio, const void* buf, unsigned long buflen
 
 // INTERNAL GLOBAL VARIABLES AND CONSTANTS
 //
+/*
 
+IMPORTANT READ ME:
+
+Read Semantics: User requests N bytes, will block/condition wait until at least 1 byte is available. Then read UP TO N bytes. I.e. read [1, N] bytes
+
+Write Semantics: User wants to write N bytes. We wait until we can write AT LEAST one byte. Then write as mcuh as possiubel from [1, N] and then return immedialty 
+
+
+
+
+*/
 
 // more pipe stuff
 // use UIO interface! Underlying UIO object is the PIPE BUFFER!
@@ -158,11 +169,18 @@ long pipe_write_uio_write(struct uio* uio, const void *buf, unsigned long buflen
     
     struct pipe_buffer* pipebuf = (struct pipe_buffer*)((char*)uio - offsetof(struct pipe_buffer, writeuio));
     
+
+
     if (pipebuf->readers_open == 0) 
     {
         return -EPIPE; // No readers, cannot write
     }
-
+    
+    // wait while buffer is NOT full
+    while (pipefull(pipebuf))
+    {
+        condition_wait(&pipebuf->not_full);
+    }
     while (pipefull(pipebuf)) 
     {
         // Wait until there is space in the buffer
@@ -277,10 +295,12 @@ long pipe_read_uio_read(struct uio* uio, void* buf, unsigned long bufsz)
         return 0; // No writers and buffer empty, EOF
     }
 
-    unsigned long bytes_read = 0;
 
     lock_acquire(&pipebuf->lock);
 
+    // starting the actual reading
+
+    unsigned long bytes_read = 0;
     char* dstbuf = (char*) buf;
 
     while (bytes_read < bufsz) 
