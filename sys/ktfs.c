@@ -104,6 +104,7 @@ struct ktfs_file_records{
 
 struct ktfs_listing_uio {
     struct uio base;
+    int read_idx;
     const struct ktfs_file_records * records;
 };
 
@@ -659,6 +660,7 @@ int ktfs_open(struct filesystem* fs, const char* name, struct uio** uioptr) { //
     if (!strncmp(name, "" , strlen(name)) || !strncmp(name, "/", strlen(name))){
         struct ktfs_listing_uio * ls;
         ls = kcalloc(1, sizeof(*ls));
+        ls->read_idx = 0;
         ls->records = records;
         *uioptr  = uio_init1(&ls->base, &ktfs_listing_uio_intf);
         return 0;
@@ -1318,12 +1320,15 @@ long ktfs_listing_read(struct uio* uio, void* buf, unsigned long bufsz) {
 
     //new clean implementation
     int ncpy = 0;
-    for (int i = 0; i < nfiles; i++){
-        if (!ls->records->filetab[i]) continue;
-        if (bufsz-ncpy <= 0) return ncpy;
-        ncpy += snprintf((char *)buf+ncpy, bufsz-ncpy, "%s%s", ls->records->filetab[i], "\n");
+    while (ls->read_idx < nfiles){ 
+        if (!ls->records->filetab[ls->read_idx]) continue;
+        if (bufsz-ncpy <= 0) {
+            return ncpy;
+        }
+        ncpy += snprintf((char *)buf+ncpy, bufsz-ncpy, "%s\r\n", ls->records->filetab[ls->read_idx]);
+        ls->read_idx++;
     }
-
+    
     return ncpy;
 }
 
