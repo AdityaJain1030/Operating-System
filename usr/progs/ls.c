@@ -6,7 +6,24 @@
 
 void main (int argc, char *argv[]){
 
-    char buf[LS_BUFSZ];
+    char buf[LS_BUFSZ+1];
+    if (argc == 1)
+    {
+        int fd = _open(-1, "");
+        if (fd < 0)
+        {
+            printf("ls cannot access root\r");
+            _exit();
+        }
+        while (1) {
+            int br = _read(fd, buf, LS_BUFSZ);
+            if (br <= 0) break;
+            buf[br] = '\0'; // null terminate end of string
+            printf("%s\n", buf);
+        }
+        _close(fd);
+        _exit();
+    }
 
     for (int i = 1; i < argc; i++){
         int fd = _open(-1, argv[i]);
@@ -16,20 +33,18 @@ void main (int argc, char *argv[]){
         if (strcmp(argv[i], "c") == 0) is_ktfs = 1;
 
         while (1){
-            int br = _read(fd, buf, LS_BUFSZ - 1);
+            int br = _read(fd, buf, LS_BUFSZ);
+            if (br <= 0) break;
+            buf[br] = '\0'; // null terminate end of string
+            printf("%s\n", buf);
 
-            buf[br+1] = '\0';
-
-            if (br == 0) break;
-
-            dprintf(STDOUT, "%s", buf);
-
-            if (is_ktfs) dputs(STDOUT, "\r\n"); //because the other listings don't have it built in like ktfs
+            // we have hella newlines idt we need this
+            // if (is_ktfs) dputs(STDOUT, "\r\n"); //because the other listings don't have it built in like ktfs
         }
+        _close(fd);
     }
-    dputs(STDOUT, "\n");
-
-
+    // we have hella newlines idt we need this
+    // dputs(STDOUT, "\n");
 }
     
 
