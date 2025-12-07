@@ -129,8 +129,7 @@ void pipe_write_uio_close(struct uio* uio) {
         // Wake up any readers waiting for data
         // this is an edge case, we need to wake them up as otherwise sicne we have 0 writers we have no way to wake up the reader
         // for example say we write "Hello". And then reader reads but then pip_write_uio_close is called. No way to "wake up" reader to return EOF
-        // make sure to append EOF?
-        int EOF_written = pipe_write_uio_write(pipebuf->writeuio, "", 1); // write EOF character
+        // make sure to append EOF?, no we dont need to, EOF is returned by function to signal  a condiiton!
         if (pipebuf->readers_open > 0 && !pipeempty(pipebuf)) 
         {
             condition_broadcast(&pipebuf->not_empty);
@@ -169,7 +168,7 @@ long pipe_write_uio_write(struct uio* uio, const void *buf, unsigned long buflen
     if (buflen == 0) return 0; // nothing to write
     struct pipe_buffer* pipebuf = (struct pipe_buffer*)((char*)uio - offsetof(struct pipe_buffer, writeuio));
     
-    // NO NEED TO CHECK IDK WHY
+    // NO NEED FOR LOCKS. Since it is okay if state is changed in this case, we acutally WANT THAT
 
     if (pipebuf->readers_open == 0) 
     {
@@ -262,7 +261,7 @@ long pipe_read_uio_read(struct uio* uio, void* buf, unsigned long bufsz)
 {
     // check if uio is null
     if (uio == NULL || buf == NULL) return -EINVAL;
-    
+    if (bufsz == 0) return 0; // nothing to read
     struct pipe_buffer* pipebuf = (struct pipe_buffer*)((char*)uio - offsetof(struct pipe_buffer, readuio));
 
 
@@ -273,36 +272,27 @@ long pipe_read_uio_read(struct uio* uio, void* buf, unsigned long bufsz)
     }
 
 
-    lock_acquire(&pipebuf->lock);
-
+    //lock_acquire(&pipebuf->lock);
+    while (pipeempty(pipebuf)) 
+    {
+        if (pipebuf->writers_open == 0 && pipeempty(pipebuf)) 
+        {
+            // not sure if we APPEND EOF here
+            //lock_release(&pipebuf->lock);
+            return 0; // No writers, and it is empty!
+        }
+        condition_wait(&pipebuf->not_empty);
+    }
     // starting the actual reading
 
-    unsigned long bytes_read = 0;
+
+    lock_acquire(&pipebuf->lock);
+    unsigned long bytes_read = min(bufsz, pipebuf->length);
     char* dstbuf = (char*) buf;
-
-    while (bytes_read < bufsz) 
-    {
-        // Wait until there is data in the buffer
-        while (pipeempty(pipebuf)) 
-        {
-            if (pipebuf->writers_open == 0) 
-            {
-                // not sure if we APPEND EOF here
-                lock_release(&pipebuf->lock);
-                return bytes_read; // No writers, return what we have read so far (could be 0), or do we return EOF?? im not too sure tbh
-            }
-            condition_wait(&pipebuf->not_empty);
-        }
-
-        // Read a byte from the buffer
-        dstbuf[bytes_read] = pipebuf->buf[pipebuf->head];
-        pipebuf->head = (pipebuf->head + 1) % pipebuf->bufsz;
-        bytes_read++;
-
-        // Signal that the buffer is not full
-        condition_signal(&pipebuf->not_full);
-    }
-    // frick idk what to do about EOF
+    memcpy(dstbuf, &pipebuf->buf[pipebuf->head], bytes_read);
+    pipebuf->head = (pipebuf->head + bytes_read) % pipebuf->bufsz;
+    pipebuf->length -= bytes_read;
+    condition_signal(&pipebuf->not_full);
     lock_release(&pipebuf->lock);
     return bytes_read;
 }
