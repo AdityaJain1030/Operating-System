@@ -10,3 +10,4 @@ blob.raw
 .gdbinit
 .vscode
 hard_docs
+usr/bin/*
