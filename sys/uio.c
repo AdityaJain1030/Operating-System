@@ -30,6 +30,14 @@ static long nulluio_read(struct uio* uio, void* buf, unsigned long bufsz);
 
 static long nulluio_write(struct uio* uio, const void* buf, unsigned long buflen);
 
+
+// forward declarations
+void pipe_write_uio_close(struct uio* uio);
+long pipe_write_uio_write(struct uio* uio, const void *buf, unsigned long buflen);
+
+void pipe_read_uio_close(struct uio* uio);
+long pipe_read_uio_read(struct uio* uio, void* buf, unsigned long bufsz);
+
 // INTERNAL GLOBAL VARIABLES AND CONSTANTS
 //
 /*
