@@ -406,6 +406,8 @@ void create_pipe(struct uio **wptr, struct uio **rptr) {
     uio_init1(&pipebuf->writeuio, &pipe_write_uio_intf);
     uio_init1(&pipebuf->readuio, &pipe_read_uio_intf);
     
+    *wptr = &pipebuf->writeuio;
+    *rptr = &pipebuf->readuio;
 }
 
 

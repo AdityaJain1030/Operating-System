@@ -622,11 +622,10 @@ int syspipe(int *wfdptr, int *rfdptr) {
     {
         if (running->uiotab[wfd] != NULL) return -EBADFD; // wfd is positive and already in use
     }
-    
     // same loop as above but for reading
     if (rfd == -1)   // find next avaiable UIO for reads
     {
-        for (rfd = 0; rfd <= PROCESS_UIOMAX; rfd++)
+        for (rfd = wfd + 1; rfd <= PROCESS_UIOMAX; rfd++)
         {
             // there are no free files
             if (rfd == PROCESS_UIOMAX) return -EMFILE;  // too many files
@@ -641,7 +640,6 @@ int syspipe(int *wfdptr, int *rfdptr) {
     }
 
     create_pipe(&running->uiotab[wfd], &running->uiotab[rfd]);  // creates the UIO pipe
-    running->uiotab[wfd] = running->uiotab[wfd];
     running->uiotab[rfd] = running->uiotab[rfd];
 
     *wfdptr = wfd;
