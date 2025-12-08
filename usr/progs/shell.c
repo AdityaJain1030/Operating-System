@@ -66,6 +66,7 @@ int parse(char* buf, char** argv, char **readinf, char** readoutf, char** cont) 
 					continue;
 
 				case '\0':
+					argv[argc] = NULL;
 					return argc;
 
 				case FOUT:
@@ -113,7 +114,8 @@ int parse(char* buf, char** argv, char **readinf, char** readoutf, char** cont) 
 				case PIPE:
 					// FIXME
 					*cont = head;
-					break;
+					argv[argc] = NULL;
+					return argc;
 
 				default:
 					// *head = temp;
