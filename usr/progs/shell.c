@@ -212,13 +212,6 @@ void main(void)
 					snprintf(name, 100, "c/%s", argv[0]);
 				else
 					snprintf(name, 100, "%s", argv[0]);
-				
-				int rett = _open(-1, name);
-				if (rett < 0)
-				{
-					printf("bad cmd file %s with error code %d \n", name, rett);
-					_exit();
-				}
 
 				if (readinf != NULL)
 				{
@@ -273,6 +266,13 @@ void main(void)
 					_close(STDIN);
 					_uiodup(pipe_in, STDIN);
 					_close(pipe_in);
+				}
+
+				int rett = _open(-1, name);
+				if (rett < 0)
+				{
+					printf("bad cmd file %s with error code %d \n", name, rett);
+					_exit();
 				}
 
 				_exec(rett, argc, argv);
