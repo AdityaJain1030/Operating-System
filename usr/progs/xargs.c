@@ -3,7 +3,7 @@
 #include "shell.h"
 
 #define BUFSIZE 1024
-#define MAXARGS 100
+#define MAXARGS 50
 
 
 // helper function for parser
@@ -12,10 +12,8 @@ char* find_terminator(char* buf) {
 	while(*p) {
 		switch(*p) {
 			case ' ':
-			case '\0':
-			case FIN:
-			case FOUT:
-			case PIPE:
+			case '\0': 
+            case '\n':
 				return p;
 			default:
 				p++;
@@ -26,7 +24,7 @@ char* find_terminator(char* buf) {
 }
 
 // add redirect in and redirect out files
-int parse(char* buf, char** argv, char **readinf, char** readoutf) {
+int input_parse(int *rem_args, char* buf, char** argv) {
 	// FIXME
 	// feel free to change this function however you see fit
 
@@ -38,90 +36,119 @@ int parse(char* buf, char** argv, char **readinf, char** readoutf) {
 	for(;;) { // find each argv
 		while(*head == ' ') head++;
 		// support newlines
-		if (*head == '\0' || *head == '\n') break;
+		//if (*head == '\0' || *head == '\n') break;
 
-		if (argc >= MAXARGS) break;
+		if (argc >= *rem_args) break;
 		argv[argc++] = head;
 		end = find_terminator(head);
-		temp = *end;
+        //printf("head: %s\n",head);
+        if (*end == '\0') break;
 		*end = '\0';
 		head = end+1;
-		// inner loop handles all file redirection
-		// it may be redirected multiple times
-		for(;;) {
-			switch(temp) {
-				case ' ':
-					while (*head == ' ') head++;
-					temp = *head;
-					// while(*(head) == ' ') head++;
-					// end = head;
-					// temp = *end;
-					continue;
-
-				case '\0':
-					return argc;
-
-				case FOUT:
-					// FIXME
-					// head++;
-					while(*head != '\0')
-					{
-						if (*head != ' ') break;
-						head += 1;
-					}
-					if (*head == '\0') break;
-					end = find_terminator(head);
-					*readoutf = head;
-					temp = *end;
-					*end = '\0';
-					head = end + 1;
-
-					// hopefully this shld work
-					// head = next + 1; // we go to the next arg
-					// if (*next == '\0') head -= 1; // if we are at end we overshot
-					// *next = '\0'; // we do this so then the file uio reader
-					// // dosent trip ... this was a bitch to debug
-					continue;
-					
-				case FIN:
-					// head++;
-					while(*head != '\0')
-					{
-						if (*head != ' ') break;
-						head += 1;
-					}
-					if (*head == '\0') break;
-					end = find_terminator(head);
-					*readinf = head;
-					temp = *end;
-					*end = '\0';
-					head = end + 1;
-
-					// head = next + 1; // we go to the next arg
-					// if (*next == '\0') head -= 1; // if we are at end we overshot
-					// *next = '\0'; // we do this so then the file uio reader
-					// // dosent trip ... this was a bitch to debug
-					continue;
-
-				case PIPE:
-					// FIXME
-					head++; // we didnt do this yet
-					break;
-
-				default:
-					// *head = temp;
-					break;
-			}
-			break;
 		}
 
-	}
     // we dont mess with this
-	// argv[argc] = NULL;
+	argv[argc] = NULL;
+
+    // for (int i = 0; i < argc; i++){
+    //    printf("%s\n", argv[i]);
+    // }
+    *rem_args -= argc;
 	return argc;
 }
 
 
 void main(int argc, char** argv) {
-    // implement this soon
+    char read[BUFSIZE + 1];
+    int br = 0;
+    
+    char * xargv[MAXARGS + 1];
+
+    int remaining_args = MAXARGS - (argc-1);
+
+
+    //FIXME: early return for argc = 1 ??????
+
+    // looping variation
+    // if (argc == 1){ //case for only args coming from input
+    //     for (;;){
+    //         memset(read, 0, BUFSIZE);
+    //         br = _read(STDIN, read, BUFSIZE);
+    //         if (br <= 0) return;
+    //
+    //         input_parse(&remaining_args, read, xargv);
+    //
+    //         if ()
+    //
+    //         _exec();
+    //
+    //
+    //     }
+    // }
+    // for (int i = 0; i < argc; i++){
+    //     printf("argv[%d]", argv[i]);
+    // }
+    
+
+    //stolen from shell
+    int pid = _fork();
+    if (pid < 0) {
+        printf("ERROR: Failed to start process with code %d", pid);
+        _exit();
+    }
+    
+
+    // the lion dosent concern himself with setup
+    if (pid != 0) {
+        _wait(pid);
+        _exit();
+    }
+
+
+
+    for (int i = 1; i < argc; i++){ //NOTE under this implementation argc will always be less than maxargs
+
+        xargv[i-1] = argv[i];
+        //printf("argv[%d]: %s\n", i-1, xargv[i-1]);
+    }
+    
+	char name[100]; // same logic as when we do a kernel copy
+	if (strchr(xargv[0], '/') == NULL)  // dosent contain a path proper, see docs for why we use this cond
+		snprintf(name, 100, "c/%s", xargv[0]);
+	else
+		snprintf(name, 100, "%s", xargv[0]);
+		
+    //printf("name: %s\n", name);
+	int rett = _open(-1, name);
+    if (rett < 0)
+    {
+        printf("bad cmd file %s with error code %d \n", name, rett);
+        _exit();
+    }
+    
+    
+    
+    
+    
+    br = _read(STDIN, read, BUFSIZE);
+    //printf("br: %d\n", br);
+    if (br <= 0) _exit();
+    //read[br] = '\0'; //ensure null termination
+    
+    //printf("argc: %d\n", argc);
+    input_parse(&remaining_args, read, &xargv[argc-1]);
+
+    
+    int total_args = (MAXARGS) - remaining_args;
+    //printf("total_args: %d\n", total_args);
+
+    // for (int i = 0; i < total_args; i++){
+    //     printf("xargv[%d]: %p\n", i, &xargv[i]);
+    // }
+
+    
+    int ret = _exec(rett, total_args, xargv);
+
+    printf("exec not working ...ret: %d\n", ret);
+    
 }
