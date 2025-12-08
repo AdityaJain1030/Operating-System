@@ -40,6 +40,10 @@ void count(int fd, char* name)
 
 void main(int argc, char *argv[]) {
     // we dont print file name
+    if (argc == 1)
+    {
+        count(STDIN, "STDIN");
+    }
     for (int i = 1; i < argc; i++)
     {
         int fd = _open(-1, argv[i]);
