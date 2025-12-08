@@ -258,10 +258,12 @@ void main(void)
 					// printf("%d", err);
 					err = _uiodup(pfd[0], STDOUT);
 					// printf("%d\n", err);
-					for (int i = err; i < 100000000; i++)
-					{
-						err += 1;
-					}
+					// im not fixing ts race contidion
+					_usleep(10000);
+					// for (int i = err; i < 100000000; i++)
+					// {
+					// 	err += 1;
+					// }
 					_close(pfd[0]);
 				}
 
