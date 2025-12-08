@@ -595,8 +595,8 @@ int syspipe(int *wfdptr, int *rfdptr) {
     // 
 
     // if (wfdptr == NULL || rfdptr == NULL) return -EINVAL;
-    if (validate_vptr(wfdptr, sizeof(unsigned long long), PTE_U | PTE_W | PTE_R) != 0) return -EINVAL; // im not sure abt our logic
-    if (validate_vptr(rfdptr, sizeof(unsigned long long), PTE_U | PTE_W | PTE_R) != 0) return -EINVAL;
+    if (validate_vptr(wfdptr, sizeof(int), PTE_U | PTE_W | PTE_R) != 0) return -EINVAL; // im not sure abt our logic
+    if (validate_vptr(rfdptr, sizeof(int), PTE_U | PTE_W | PTE_R) != 0) return -EINVAL;
 
     struct process *running = current_process();
     
@@ -605,8 +605,9 @@ int syspipe(int *wfdptr, int *rfdptr) {
     int rfd = *rfdptr;
 
     if (wfd >= PROCESS_UIOMAX || rfd >= PROCESS_UIOMAX) return -EBADFD; // bro not sure when to use EBADFD or EINVAL
-
-    if (wfd < -1)   // find next avaiable UIO for write
+    if (wfd < -1) return -EBADFD;
+    if (rfd < -1) return -EBADFD;
+    if (wfd == -1)   // find next avaiable UIO for write
     {
         for (wfd = 0; wfd <= PROCESS_UIOMAX; wfd++)
         {
@@ -623,7 +624,7 @@ int syspipe(int *wfdptr, int *rfdptr) {
     }
     
     // same loop as above but for reading
-    if (rfd < -1)   // find next avaiable UIO for reads
+    if (rfd == -1)   // find next avaiable UIO for reads
     {
         for (rfd = 0; rfd <= PROCESS_UIOMAX; rfd++)
         {
