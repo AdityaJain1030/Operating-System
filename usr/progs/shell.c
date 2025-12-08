@@ -281,7 +281,7 @@ void main(void)
 		}
 		for (int i = 0; i < childcount; i ++)
 		{
-			_wait(children[childcount]);
+			_wait(children[i]);
 		}
 	}
 }
