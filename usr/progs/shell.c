@@ -254,8 +254,14 @@ void main(void)
 				{
 					// bruh moment
 					_close(pfd[1]);
-					_close(STDOUT);
-					_uiodup(pfd[0], STDOUT);
+					int err = _close(STDOUT);
+					// printf("%d", err);
+					err = _uiodup(pfd[0], STDOUT);
+					// printf("%d\n", err);
+					for (int i = err; i < 100000000; i++)
+					{
+						err += 1;
+					}
 					_close(pfd[0]);
 				}
 
@@ -282,9 +288,10 @@ void main(void)
 			_close(pfd[0]);
 			// _close(pfd[1]);
 		}
+		_close(pipe_in);
 		for (int i = 0; i < childcount; i ++)
 		{
-			_wait(children[i]);
+			_wait(0);
 		}
 	}
 }
