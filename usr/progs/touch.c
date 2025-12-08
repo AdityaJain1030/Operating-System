@@ -6,7 +6,7 @@ void main(int argc, char *argv[]) {
 
     for (int i = 1; i < argc; i++) {
         if (_fscreate(argv[i]) < 0) {
-            printf("failed to create write %s", argv[i]);
+            printf("failed to create write %s\n", argv[i]);
         }
     }
 
