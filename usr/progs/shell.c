@@ -147,103 +147,141 @@ void main(void)
 
 	for (;;)
 	{
-		char* cont;
-		readinf = NULL;
-		readoutf = NULL; // reset every command 
 		memset(buf, 0, BUFSIZE);
 		printf("LUMON OS> ");
 		getsn(buf, BUFSIZE - 1);
 
 		if (0 == strcmp(buf, "exit")) _exit();
-
-		// FIXME
-		// Call your parse function and exec the user input
-		argc = parse(buf, argv, &readinf,  &readoutf, &cont);
-		// printf("%d", argc);
+	
+		char* cont = buf;
+		int children[20];
+		int childcount = 0;
 		
-		// print out all the buf, argv, readinf, and readoutf in console
-		// print_parsed_command(buf, argv, readinf, readoutf, argc);		
-		// continue;
-		
-		if (argc == 0) continue;
-		if (argc > ARG_MAX) continue;
+		int pipe_in = -1;
 
-		// fork
-		// WE FORK FIRST RIGHT AWAY... THIS IS ONE OF THE REASONS WE 
-		// WANT CHILD TO RUN FIRST SO THAT WE CAN SETUP CHILD IN SHELL
-		int pid = _fork();
-		if (pid < 0) {
-			printf("ERROR: Failed to start process with code %d", pid);
-			continue;
-		}
-
-		// the lion dosent concern himself with setup
-		if (pid != 0) {
-			_wait(pid);
-			continue;
-		}
-
-		// open files
-
-		// for exec file prepend c if it is not alr there
-		char name[100]; // same logic as when we do a kernel copy
-		if (strchr(argv[0], '/') == NULL)  // dosent contain a path proper, see docs for why we use this cond
-			snprintf(name, 100, "c/%s", argv[0]);
-		else
-			snprintf(name, 100, "%s", argv[0]);
-		
-		int rett = _open(-1, name);
-		if (rett < 0)
+		while (cont != NULL)
 		{
-			printf("bad cmd file %s with error code %d \n", name, rett);
-			_exit();
-		}
-		
-		if (readinf != NULL)
-		{
-			_close(STDIN);
-			int ret = _open(STDIN, readinf);
-			if (ret < 0) {
-				printf("bad input file %s with error code %d \n", readinf, ret);
-				_exit();
+			cont = NULL;	
+			readinf = NULL;
+			readoutf = NULL; // reset every command 
+			argc = parse(buf, argv, &readinf,  &readoutf, &cont);
+			
+			if (argc == 0) break;
+			if (argc > ARG_MAX) break;
+
+			// FIXME
+			// Call your parse function and exec the user input
+			// printf("%d", argc);
+			
+			// print out all the buf, argv, readinf, and readoutf in console
+			// print_parsed_command(buf, argv, readinf, readoutf, argc);		
+			// continue;
+			
+
+			// fork
+			// WE FORK FIRST RIGHT AWAY... THIS IS ONE OF THE REASONS WE 
+			// WANT CHILD TO RUN FIRST SO THAT WE CAN SETUP CHILD IN SHELL
+			int pfd[2] = {-1, -1};
+            if (cont != NULL) {
+				int err = _pipe(&pfd[0], &pfd[1]);
+				if (err < 0)
+				{
+					printf("failed to make pipe\n");
+					break;
+				}
+            }
+
+			int pid = _fork();
+			if (pid < 0) {
+				printf("ERROR: Failed to start process with code %d", pid);
+				if (cont != NULL)
+				{
+					_close(pfd[0]);
+					_close(pfd[1]);
+				}
+				break;
 			}
-		}
-		if (readoutf != NULL)
-		{
-			_close(STDOUT);
-			// we can just delete and recreate the readoutf each time
-			// instead of doing the bs below
-			_fsdelete(readoutf);
-			int ret = _fscreate(readoutf);
-			if (ret < 0)
+			// what the child runs
+			if (pid == 0)
 			{
-				printf("bad output file create %s with error code %d \n", readoutf, ret);
-				_exit();
-			}
-			ret = _open(STDOUT, readoutf);
-			if (ret < 0)
-			{
-				printf("bad output file open %s with error code %d \n", readoutf, ret);
+				// open files
+				// for exec file prepend c if it is not alr there
+				char name[100]; // same logic as when we do a kernel copy
+				if (strchr(argv[0], '/') == NULL)  // dosent contain a path proper, see docs for why we use this cond
+					snprintf(name, 100, "c/%s", argv[0]);
+				else
+					snprintf(name, 100, "%s", argv[0]);
+				
+				int rett = _open(-1, name);
+				if (rett < 0)
+				{
+					printf("bad cmd file %s with error code %d \n", name, rett);
+					_exit();
+				}
+
+				if (readinf != NULL)
+				{
+					_close(STDIN);
+					int ret = _open(STDIN, readinf);
+					if (ret < 0) {
+						printf("bad input file %s with error code %d \n", readinf, ret);
+						_exit();
+					}
+				}
+				
+				if (readoutf != NULL)
+				{
+					_close(STDOUT);
+					// we can just delete and recreate the readoutf each time
+					// instead of doing the bs below
+					_fsdelete(readoutf);
+					int ret = _fscreate(readoutf);
+					if (ret < 0)
+					{
+						printf("bad output file create %s with error code %d \n", readoutf, ret);
+						_exit();
+					}
+					ret = _open(STDOUT, readoutf);
+					if (ret < 0)
+					{
+						printf("bad output file open %s with error code %d \n", readoutf, ret);
+						_exit();
+					}
+				}
+				// new, we have to change our output to the pipe out
+				if (cont != NULL)
+				{
+					_close(STDOUT);
+					_uiodup(pfd[0], STDOUT);
+					_close(pfd[0]);
+				}
+
+				// if pipe is in we change to this
+				if (pipe_in != -1)
+				{
+					_close(STDIN);
+					_uiodup(pipe_in, STDIN);
+					_close(pipe_in);
+				}
+
+				_exec(rett, argc, argv);
+				printf("Exec not working cro");
 				_exit();
 
-				// try creating it first
-				// if (_fscreate(readoutf) < 0)
-				// {
-					// printf("bad input file %s with error code %d \n", readinf, ret);
-				// 	_exit();
-				// }
-				// ret = _open(STDOUT, readoutf);
-				// if (ret < 0)
-				// {
-				// 	printf("bad input file %s with error code %d \n", readinf, ret);
-				// 	_exit();
-				// }
 			}
+
+			// we are in parent land now
+			children[childcount] = pid;
+			childcount += 1;
+
+			if (pipe_in != -1) _close(pipe_in);
+			pipe_in = pfd[1];
+			_close(pfd[0]);
+			// _close(pfd[1]);
 		}
-
-		//execute
-
-		_exec(rett, argc, argv);
-		printf("Exec not working cro");
+		for (int i = 0; i < childcount; i ++)
+		{
+			_wait(children[childcount]);
+		}
 	}
 }
