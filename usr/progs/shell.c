@@ -113,6 +113,8 @@ int parse(char* buf, char** argv, char **readinf, char** readoutf, char** cont) 
 
 				case PIPE:
 					// FIXME
+					// head++;
+					if (*head == PIPE) head++;
 					*cont = head;
 					argv[argc] = NULL;
 					return argc;
@@ -160,11 +162,10 @@ void main(void)
 		int pipe_in = -1;
 
 		while (cont != NULL)
-		{
-			cont = NULL;	
+		{	
 			readinf = NULL;
 			readoutf = NULL; // reset every command 
-			argc = parse(buf, argv, &readinf,  &readoutf, &cont);
+			argc = parse(cont, argv, &readinf,  &readoutf, &cont);
 			
 			if (argc == 0) break;
 			if (argc > ARG_MAX) break;
@@ -251,6 +252,8 @@ void main(void)
 				// new, we have to change our output to the pipe out
 				if (cont != NULL)
 				{
+					// bruh moment
+					_close(pfd[1]);
 					_close(STDOUT);
 					_uiodup(pfd[0], STDOUT);
 					_close(pfd[0]);
